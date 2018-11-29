@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from setuptools import setup
+from setuptools import setup, find_packages
 from glob import glob
 
 setup(
@@ -21,10 +21,9 @@ setup(
     description='Differentiate, compile, and transform Numpy code.',
     author='JAX team',
     author_email='jax-team@google.com',
-    packages=['jax', 'jax.lib', 'jax.interpreters', 'jax.numpy', 'jax.scipy',
-              'jax.experimental'],
+    packages=find_packages(),
     install_requires=['numpy>=1.12', 'six', 'protobuf', 'absl-py'],
     url='https://github.com/google/jax',
     license='Apache-2.0',
-    package_data={'jax.lib': glob('jax/lib/*.so')},
+    package_data={'jax.lib': ['_pywrap_xla.so']},
 )
