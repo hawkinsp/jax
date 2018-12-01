@@ -16,7 +16,7 @@ from setuptools import setup, find_packages
 from glob import glob
 import os
 
-binary_libs = [os.path.basename(f) for f in glob('jax/lib/*.so')]
+binary_libs = [os.path.basename(f) for f in glob('jax/lib/*.so*')]
 
 setup(
     name='jax',

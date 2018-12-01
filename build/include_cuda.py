@@ -32,11 +32,13 @@ xla_so = os.path.join(lib, '_pywrap_xla.so')
 def shell(cmd):
   print(' '.join(cmd))
   output = subprocess.check_output(cmd)
-  return map(str.strip, output.decode("UTF-8").strip().split('\n'))
+  return [line.strip() for line in output.decode("UTF-8").strip().split('\n')]
 
 def ldd(filename):
-  return [line.strip().split() for line in shell(['ldd', filename])
-          if '=>' in line]
+  # wrapper for calling 'ldd' that filters out extraneous lines
+  dynamic = [line.strip().split() for line in shell(['ldd', filename])
+             if '=>' in line]
+  return [lst for lst in dynamic if len(lst) == 4]
 
 # Whitelist of libraries we want to include in our wheel.
 cuda_library_names = [
@@ -123,7 +125,7 @@ for libname, srcpath in ldd_paths:
 for line in filter(is_cuda_lib, shell(['ldd', xla_so])):
   if 'not found' in line:
     msg = 'ERROR: including cuda failed: ldd shows libraries not resolved:'
-  elif os.path.abspath(lib) not in line:
+  elif len(line.strip().split()) == 4 and os.path.abspath(lib) not in line:
     msg = 'ERROR: including cuda failed: ldd shows original library path:'
   else:
     continue
