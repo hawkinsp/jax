@@ -3,4 +3,8 @@
 /jax/lib/pywrap_xla.py
 /jax/lib/xla_client.py
 /jax/lib/xla_data_pb2.py
+/jax/lib/*.so.*
+/dist
+/bazel-*
+/.bazelrc
 jax.egg-info

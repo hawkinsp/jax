@@ -14,6 +14,9 @@
 
 from setuptools import setup, find_packages
 from glob import glob
+import os
+
+binary_libs = [os.path.basename(f) for f in glob('jax/lib/*.so')]
 
 setup(
     name='jax',
@@ -25,5 +28,5 @@ setup(
     install_requires=['numpy>=1.12', 'six', 'protobuf', 'absl-py'],
     url='https://github.com/google/jax',
     license='Apache-2.0',
-    package_data={'jax.lib': ['_pywrap_xla.so']},
+    package_data={'jax.lib': binary_libs},
 )
