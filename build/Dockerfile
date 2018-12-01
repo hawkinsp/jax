@@ -8,3 +8,6 @@ RUN pip install numpy
 RUN git clone https://github.com/nixos/patchelf /tmp/patchelf
 WORKDIR /tmp/patchelf
 RUN bash bootstrap.sh && ./configure && make && make install
+
+WORKDIR /build
+ENV TEST_TMPDIR /build
