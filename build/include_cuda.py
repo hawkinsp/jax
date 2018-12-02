@@ -44,11 +44,9 @@ def ldd(filename):
 cuda_library_names = [
     'libcudart.so',
     'libcublas.so',
-    'libcuda.so',  # itself needs libnvidia-fatbinaryloader.so
     'libcudnn.so',
     'libcufft.so',
     'libcurand.so',
-    'libnvidia-fatbinaryloader.so',
 ]
 
 def is_cuda_lib(name):
@@ -76,8 +74,7 @@ shell(['chmod', '+w', xla_so])
 
 # Using the 'ldd' program, set up a mapping from cuda library names in the
 # xla_so .so file to their real path names (dereferencing symbolic links). By
-# using 'ldd' we get the transitive closure of dependencies, so e.g.
-# libnvidia-fatbinaryloader.so is included in the list.
+# using 'ldd' we get the transitive closure of dependencies.
 # Example:
 #   libname = 'libcudnn.so.7'
 #   srcpath = '/usr/lib/x86_64-linux-gnu/libcudnn.so.7'  # symlink
@@ -104,9 +101,8 @@ for libname, srcpath in ldd_paths:
   shell(['cp', srcpath, dstpath])
   shell(['patchelf', '--replace-needed', libname, dstname, xla_so])
 
-  # The copied libraries could have had dependencies on each other (like
-  # libcuda.so depends on libnvidia-fatbinaryloader.so), and so we need to
-  # replace those names in the moved libraries.
+  # The copied libraries could have had dependencies on each other, and so we
+  # need to replace those names in the moved libraries.
   # Example:
   #   other_libname = 'libnvidia-fatbinaryloader.so.410.70'
   #   other_dstname = 'libnvidia-fatbinaryloader-e9ef9302.so.410.70'

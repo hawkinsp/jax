@@ -3,7 +3,7 @@ LABEL maintainer "Matt Johnson <mattjj@google.com>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
             git python python-pip python-dev dh-autoreconf
-RUN pip install numpy
+RUN pip install numpy setuptools wheel
 
 RUN git clone https://github.com/nixos/patchelf /tmp/patchelf
 WORKDIR /tmp/patchelf
