@@ -1,4 +1,4 @@
-#!/bin/bash -v
+#!/bin/bash -xev
 git clone -b binary-distros https://github.com/google/jax /build/jax
 cd /build/jax
 
