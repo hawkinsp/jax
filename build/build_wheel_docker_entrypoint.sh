@@ -7,7 +7,7 @@ usage() {
   exit 1
 }
 
-if [[ $# != 3 ]]
+if [[ $# != 2 ]]
 then
   usage
 fi
