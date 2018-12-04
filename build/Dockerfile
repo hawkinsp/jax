@@ -4,7 +4,7 @@ LABEL maintainer "Matt Johnson <mattjj@google.com>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
             dh-autoreconf git curl \
-            python python-pip python-dev
+            python python-pip python-dev \
             python3 python3-pip python3-dev
 RUN pip install numpy setuptools wheel && pip3 install numpy setuptools wheel
 
