@@ -11,10 +11,8 @@ if [[ $# != 2 ]]
 then
   usage
 fi
-python_verison_flag=$1
-cuda_flag=$2
 
-case "$python_version_flag" in
+case $1 in
   python3)
     update-alternatives --install /usr/bin/python python /usr/bin/python3 10
     ;;
@@ -24,7 +22,7 @@ case "$python_version_flag" in
     usage
 esac
 
-case "$cuda_flag" in
+case $2 in
   cuda-included)
     python build.py --enable_cuda --cudnn_path /usr/lib/x86_64-linux-gnu/
     python build/include_cuda.py
