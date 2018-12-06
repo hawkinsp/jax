@@ -1,4 +1,10 @@
 #!/bin/bash -xev
+if [ ! -d "/dist" ]
+then
+  echo "/dist must be mounted to produce output"
+  exit 1
+fi
+
 git clone -b binary-distros https://github.com/google/jax /build/jax
 cd /build/jax
 
@@ -37,5 +43,5 @@ case $2 in
     usage
 esac
 
-python setup.py bdist_wheel
-cp dist/*.whl /wheels/
+python setup.py bdist bdist_wheel
+cp -r dist/* /dist
