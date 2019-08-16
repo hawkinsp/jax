@@ -972,19 +972,35 @@ def _select_and_gather_add(tangents, operand, select_prim, window_dimensions,
       window_dimensions=tuple(window_dimensions),
       window_strides=tuple(window_strides), padding=padding)
 
-def sort(operand, dimension=-1):
+def sort(keys, dimension=-1, comparator=None):
   """Wraps XLA's `Sort
   <https://www.tensorflow.org/xla/operation_semantics#sort>`_
   operator.
   """
-  return sort_p.bind(operand, dimension=dimension)
+  return sort_key_val(keys, (), dimension=dimension, comparator=comparator)[0]
 
-def sort_key_val(keys, values, dimension=-1):
-  # TODO(mattjj): new sort_key_val is variadic
-  result = sort_key_val_p.bind(keys, values, dimension=dimension)
-  sorted_keys, sorted_values = result
-  return sorted_keys, sorted_values
-
+def sort_key_val(keys, values, dimension=-1, comparator=None):
+  tuple_keys = isinstance(keys, tuple)
+  tuple_values = isinstance(values, tuple)
+  if not tuple_keys:
+    keys = (keys,)
+  if not tuple_values:
+    values = (values,)
+  nkeys = len(keys)
+  if nkeys == 0:
+    raise ValueError("lax.sort requires at least one sort key")
+  jaxpr = None
+  consts = None
+  if comparator:
+    pvals = _abstractify((keys, keys))
+    jaxpr, _, consts = pe.trace_unwrapped_to_jaxpr(comparator, pvals,
+                                                   instantiate=False)
+  out = list(sort_p.bind(*(keys + values), key_arity=nkeys,
+                         dimension=dimension, comparator_jaxpr=jaxpr,
+                         comparator_consts=consts))
+  keys = tuple(out[:nkeys]) if tuple_keys else out[0]
+  values = tuple(out[nkeys:]) if tuple_values else out[nkeys]
+  return keys, values
 
 def tie_in(x, y):
   return tie_in_p.bind(x, y)
@@ -3826,103 +3842,189 @@ xla.backend_specific_translations['tpu'][select_and_gather_add_p] = partial(
   _select_and_gather_add_translation,
   max_bits=32)
 
+def _sort_abstract_eval(*args, **kwargs):
+  return core.AbstractTuple(args)
 
-sort_shape = lambda operand, dimension: operand.shape
+def _sort_impl(*args, **kwargs):
+  out = xla.apply_primitive(sort_p, *args, **kwargs)
+  return core.pack(tuple(x for x in out))
 
-def _sort_jvp_rule(g, operand, dimension):
-  _, g_out = sort_key_val(operand, g, dimension)
-  return g_out
+def _sort_translation_rule(c, *args, **kwargs):
+  dimension = kwargs["dimension"]
+  key_arity = kwargs["key_arity"]
+  comparator_jaxpr = kwargs["comparator_jaxpr"]
+  comparator_consts = kwargs["comparator_consts"]
+  sort_kwargs = {}
+  if comparator_jaxpr:
+    arg_shapes = [xla_client.Shape.array_shape(c.GetShape(a).element_type(), [])
+                  for a in args]
+    key_shapes = xla_client.tuple_shape(shapes[:key_arity])
+    cmp = xla.jaxpr_computation(jaxpr, consts, (), key_shapes, key_shapes)
+    b = xla_client.ComputationBuilder()
+    xs = []
+    ys = []
+    for i, a in enumerate(arg_shapes):
+      x = b.ParameterWithShape(a)
+      y = b.ParameterWithShape(a)
+      if i < key_arity:
+        xs.append(x)
+        ys.append(y)
+    b.Call(cmp, [c.Tuple(xs), c.Tuple(ys)])
+    sort_kwargs["comparator"] = b.Build()
 
-def _sort_batch_rule(batched_args, batch_dims, dimension):
-  operand, = batched_args
-  bdim, = batch_dims
-  dimension = dimension % (operand.ndim - 1)
-  new_dimension = dimension + (bdim <= dimension)
-  return sort(operand, dimension=new_dimension), bdim
+  out = xla_client.ops.Sort(c._builder, list(args), dimension=dimension,
+                            **sort_kwargs)
+  return c.Tuple(out) if len(args) == 1 else out
 
-sort_p = standard_primitive(sort_shape, _input_dtype, 'sort')
-ad.defjvp(sort_p, _sort_jvp_rule)
-batching.primitive_batchers[sort_p] = _sort_batch_rule
+def _sort_jvp(primals, tangents, key_arity, dimension, comparator_jaxpr,
+              comparator_consts):
+  keys, values = primals[:key_arity], primals[key_arity:]
+  n = len(primals)
+  assert len(tangents) == n
+
+  primals_out = sort_p.bind(
+    *primals, key_arity=key_arity, dimension=dimension,
+    comparator_jaxpr=comparator_jaxpr, comparator_consts=comparator_consts)
+
+  nonzero_tangents = [i for i in range(n) if tangents[i] is not ad_util.zero]
+  sorted_tangents = list(sort_p.bind(
+    *(tuple(keys) + tuple(tangents[i] for i in nonzero_tangents)),
+    key_arity=key_arity, dimension=dimension,
+    comparator_jaxpr=comparator_jaxpr, comparator_consts=comparator_consts))
+
+  tangents_out = [ad_util.zero] * len(tangents)
+  for i, t in zip(nonzero_tangents, sorted_tangents[key_arity:]):
+    tangents_out[i] = t
+  return core.pack(primals_out), ad.TangentTuple(tangents_out)
+
+def _sort_transpose_rule(t, *args, **kwargs):
+  dimension = kwargs["dimension"]
+  key_arity = kwargs["key_arity"]
+  t = [t] if len(args) == 1 else t
+  assert len(t) == len(args), (t, args)
+
+  keys, values = args[:key_arity], args[key_arity:]
+  t_keys, t_values = t[:key_arity], t[key_arity:]
+  assert all(k is ad_util.zero for k in t_keys), t_keys
+
+  iota = broadcasted_iota(onp.int32, keys[0].shape, dimension % keys[0].ndim)
+  perm = tuple(sort_p.bind(*(keys + (iota,)), **kwargs))[key_arity:]
+  keys_result = [ad_util.zero if k is None else None for k in keys]
+
+  value_indices = [i for i in range(len(values)) if values[i] is None
+                   and t_values[i] is not ad_util.zero]
+  values_result = [ad_util.zero] * len(values)
+  _, value_outs = sort_key_val(perm, tuple(t_values[i] for i in value_indices),
+                               dimension=dimension)
+  for i, v in zip(value_indices, value_outs):
+    values_result[i] = v
+  return keys_result + values_result
 
 
-def _sort_key_val_abstract_eval(keys, values, dimension):
-  return core.AbstractTuple((keys, values))
+sort_p = Primitive('sort')
+sort_p.def_impl(_sort_impl)
+sort_p.def_abstract_eval(_sort_abstract_eval)
+xla.translations[sort_p] = _sort_translation_rule
+ad.primitive_jvps[sort_p] = _sort_jvp
+ad.primitive_transposes[sort_p] = _sort_transpose_rule
+#batching.primitive_batchers[sort_p] = _sort_batch_rule
 
-def _sort_key_val_impl(keys, values, dimension):
-  out = xla.apply_primitive(sort_key_val_p, keys, values, dimension=dimension)
-  sorted_keys, sorted_values = out
-  return core.pack((sorted_keys, sorted_values))
+# sort_shape = lambda operand, dimension: operand.shape
 
-def _sort_key_val_jvp(primals, tangents, dimension):
-  # NOTE(mattjj): this re-sorts three times, but if we had a variadic
-  # sort_key_val, or if we could apply a fixed permutation efficiently, we could
-  # implement this jvp rule with a single sort. The apply_permutation primitive
-  # would make the jvp (and corresponding transpose rule) faster and easier.
-  # This would also be cleaner if we didn't get the sorted keys out.
-  # TODO(mattjj): make sort_key_val variadic, no sorted keys out by default
-  keys, values = primals
-  keys_tangents, values_tangents = tangents
+# def _sort_jvp_rule(g, operand, dimension):
+#   _, g_out = sort_key_val(operand, g, dimension)
+#   return g_out
 
-  val_out = sort_key_val(keys, values, dimension)
+# def _sort_batch_rule(batched_args, batch_dims, dimension):
+#   operand, = batched_args
+#   bdim, = batch_dims
+#   dimension = dimension % (operand.ndim - 1)
+#   new_dimension = dimension + (bdim <= dimension)
+#   return sort(operand, dimension=new_dimension), bdim
 
-  if keys_tangents is ad_util.zero:
-    keys_tangents_out = ad_util.zero
-  else:
-    keys_tangents_out = _sort_jvp_rule(keys_tangents, keys, dimension)
+# sort_p = standard_primitive(sort_shape, _input_dtype, 'sort')
+# ad.defjvp(sort_p, _sort_jvp_rule)
+# batching.primitive_batchers[sort_p] = _sort_batch_rule
 
-  if values_tangents is ad_util.zero:
-    values_tangents_out = ad_util.zero
-  else:
-    values_tangents_out = _sort_jvp_rule(values_tangents, keys, dimension)
 
-  tangents_out = keys_tangents_out, values_tangents_out
-  return core.pack(val_out), ad.TangentTuple(tangents_out)
+# def _sort_key_val_abstract_eval(keys, values, dimension):
+#   return core.AbstractTuple((keys, values))
 
-def _sort_key_val_transpose_rule(t, keys, values, dimension):
-  t_keys, t_values = t
-  assert t_keys is ad_util.zero
-  iota = broadcasted_iota(onp.int32, keys.shape, dimension % keys.ndim)
-  _, perm = sort_key_val(keys, iota)
-  keys_result = ad_util.zero if keys is None else None
-  values_result = sort_key_val(perm, t_values)[1] if values is None else None
-  return [keys_result, values_result]
+# def _sort_key_val_impl(keys, values, dimension):
+#   out = xla.apply_primitive(sort_key_val_p, keys, values, dimension=dimension)
+#   sorted_keys, sorted_values = out
+#   return core.pack((sorted_keys, sorted_values))
 
-def _sort_key_val_batch_rule(batched_args, batch_dims, dimension):
-  keys, values = batched_args
-  keys_bdim, values_bdim = batch_dims
-  assert keys_bdim is not None or values_bdim is not None
-  if keys_bdim == values_bdim:
-    new_dimension = dimension + (keys_bdim <= dimension)
-    out = sort_key_val(keys, values, new_dimension)
-    return core.pack(out), keys_bdim
-  elif keys_bdim is not None and values_bdim is not None:
-    keys_trans = batching.moveaxis(keys.shape[keys_bdim], values_bdim,
-                                   keys_bdim, keys)
-    new_dimension = dimension + (values_bdim <= dimension)
-    out = sort_key_val(keys_trans, values, new_dimension)
-    return core.pack(out), values_bdim
-  elif keys_bdim is None:
-    broadcast_dimensions = onp.delete(onp.arange(values.ndim), values_bdim)
-    new_keys = broadcast_in_dim(keys, values.shape, broadcast_dimensions)
-    new_dimension = dimension + (values_bdim <= dimension)
-    out = sort_key_val(new_keys, values, new_dimension)
-    return core.pack(out), values_bdim
-  elif values_bdim is None:
-    broadcast_dimensions = onp.delete(onp.arange(keys.ndim), keys_bdim)
-    new_values = broadcast_in_dim(values, keys.shape, broadcast_dimensions)
-    new_dimension = dimension + (keys_bdim <= dimension)
-    out = sort_key_val(keys, new_values, new_dimension)
-    return core.pack(out), keys_bdim
-  else:
-    raise Exception  # unreachable
+# def _sort_key_val_jvp(primals, tangents, dimension):
+#   # NOTE(mattjj): this re-sorts three times, but if we had a variadic
+#   # sort_key_val, or if we could apply a fixed permutation efficiently, we could
+#   # implement this jvp rule with a single sort. The apply_permutation primitive
+#   # would make the jvp (and corresponding transpose rule) faster and easier.
+#   # This would also be cleaner if we didn't get the sorted keys out.
+#   # TODO(mattjj): make sort_key_val variadic, no sorted keys out by default
+#   keys, values = primals
+#   keys_tangents, values_tangents = tangents
 
-sort_key_val_p = Primitive('sort_key_val')
-sort_key_val_p.def_impl(_sort_key_val_impl)
-sort_key_val_p.def_abstract_eval(_sort_key_val_abstract_eval)
-xla.translations[sort_key_val_p] = partial(standard_translate, 'sort_key_val')
-ad.primitive_jvps[sort_key_val_p] = _sort_key_val_jvp
-ad.primitive_transposes[sort_key_val_p] = _sort_key_val_transpose_rule
-batching.primitive_batchers[sort_key_val_p] = _sort_key_val_batch_rule
+#   val_out = sort_key_val(keys, values, dimension)
+
+#   if keys_tangents is ad_util.zero:
+#     keys_tangents_out = ad_util.zero
+#   else:
+#     keys_tangents_out = _sort_jvp_rule(keys_tangents, keys, dimension)
+
+#   if values_tangents is ad_util.zero:
+#     values_tangents_out = ad_util.zero
+#   else:
+#     values_tangents_out = _sort_jvp_rule(values_tangents, keys, dimension)
+
+#   tangents_out = keys_tangents_out, values_tangents_out
+#   return core.pack(val_out), ad.TangentTuple(tangents_out)
+
+# def _sort_key_val_transpose_rule(t, keys, values, dimension):
+#   t_keys, t_values = t
+#   assert t_keys is ad_util.zero
+#   iota = broadcasted_iota(onp.int32, keys.shape, dimension % keys.ndim)
+#   _, perm = sort_key_val(keys, iota)
+#   keys_result = ad_util.zero if keys is None else None
+#   values_result = sort_key_val(perm, t_values)[1] if values is None else None
+#   return [keys_result, values_result]
+
+# def _sort_key_val_batch_rule(batched_args, batch_dims, dimension):
+#   keys, values = batched_args
+#   keys_bdim, values_bdim = batch_dims
+#   assert keys_bdim is not None or values_bdim is not None
+#   if keys_bdim == values_bdim:
+#     new_dimension = dimension + (keys_bdim <= dimension)
+#     out = sort_key_val(keys, values, new_dimension)
+#     return core.pack(out), keys_bdim
+#   elif keys_bdim is not None and values_bdim is not None:
+#     keys_trans = batching.moveaxis(keys.shape[keys_bdim], values_bdim,
+#                                    keys_bdim, keys)
+#     new_dimension = dimension + (values_bdim <= dimension)
+#     out = sort_key_val(keys_trans, values, new_dimension)
+#     return core.pack(out), values_bdim
+#   elif keys_bdim is None:
+#     broadcast_dimensions = onp.delete(onp.arange(values.ndim), values_bdim)
+#     new_keys = broadcast_in_dim(keys, values.shape, broadcast_dimensions)
+#     new_dimension = dimension + (values_bdim <= dimension)
+#     out = sort_key_val(new_keys, values, new_dimension)
+#     return core.pack(out), values_bdim
+#   elif values_bdim is None:
+#     broadcast_dimensions = onp.delete(onp.arange(keys.ndim), keys_bdim)
+#     new_values = broadcast_in_dim(values, keys.shape, broadcast_dimensions)
+#     new_dimension = dimension + (keys_bdim <= dimension)
+#     out = sort_key_val(keys, new_values, new_dimension)
+#     return core.pack(out), keys_bdim
+#   else:
+#     raise Exception  # unreachable
+
+# sort_key_val_p = Primitive('sort_key_val')
+# sort_key_val_p.def_impl(_sort_key_val_impl)
+# sort_key_val_p.def_abstract_eval(_sort_key_val_abstract_eval)
+# xla.translations[sort_key_val_p] = partial(standard_translate, 'sort_key_val')
+# ad.primitive_jvps[sort_key_val_p] = _sort_key_val_jvp
+# ad.primitive_transposes[sort_key_val_p] = _sort_key_val_transpose_rule
+# batching.primitive_batchers[sort_key_val_p] = _sort_key_val_batch_rule
 
 
 def _tie_in_transpose_rule(t):
