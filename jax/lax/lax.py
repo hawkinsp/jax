@@ -1363,15 +1363,18 @@ def reciprocal(x):
   r"""Elementwise reciprocal: :math:`1 \over x`."""
   return div(_const(x, 1), x)
 
+@api.jit
 def tan(x):
   r"""Elementwise tangent: :math:`\mathrm{tan}(x)`."""
   return div(sin(x), cos(x))
 
+@api.jit
 def asin(x):
   r"""Elementwise arc sine: :math:`\mathrm{asin}(x)`."""
   return mul(_const(x, 2),
              atan2(x, add(_const(x, 1), sqrt(sub(_const(x, 1), square(x))))))
 
+@api.jit
 def acos(x):
   r"""Elementwise arc cosine: :math:`\mathrm{acos}(x)`."""
   return select(
@@ -1384,17 +1387,27 @@ def atan(x):
   r"""Elementwise arc tangent: :math:`\mathrm{atan}(x)`."""
   return atan2(x, _const(x, 1))
 
+@api.jit
 def sinh(x):
   r"""Elementwise hyperbolic sine: :math:`\mathrm{sinh}(x)`."""
+  dtype = _dtype(x)
+  if dtype == onp.float16:
+    x = convert_element_type(x, onp.float32)
   log_half = _const(x, onp.log(0.5))
   # This formulation avoids overflow when e^x is inf but e^x/2 is not inf.
-  return sub(exp(add(log_half, x)), exp(sub(log_half, x)))
+  out = sub(exp(add(log_half, x)), exp(sub(log_half, x)))
+  return convert_element_type(out, dtype)
 
+@api.jit
 def cosh(x):
   r"""Elementwise hyperbolic cosine: :math:`\mathrm{cosh}(x)`."""
+  dtype = _dtype(x)
+  if dtype == onp.float16:
+    x = convert_element_type(x, onp.float32)
   log_half = _const(x, onp.log(0.5))
   # This formulation avoids overflow when e^x is inf but e^x/2 is not inf.
-  return add(exp(add(log_half, x)), exp(sub(log_half, x)))
+  out = add(exp(add(log_half, x)), exp(sub(log_half, x)))
+  return convert_element_type(out, dtype)
 
 
 # Add some methods to ShapedArray that rely on lax primitives
@@ -1634,7 +1647,7 @@ complex_p = binop(_complex_dtype, [_complex_elem_types, _complex_elem_types],
                   'complex')
 ad.deflinear(complex_p, lambda t: [real(t), imag(neg(t))])
 
-conj_p = unop(_complex_dtype, _float | _complex, 'conj')
+conj_p = unop(_complex_dtype, _complex_elem_types | _complex, 'conj')
 
 def _conj_transpose_rule(t, x, input_dtype):
   assert x is ad.undefined_primal

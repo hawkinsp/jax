@@ -53,7 +53,7 @@ def num_float_bits(dtype):
 # For standard unops and binops, we can generate a large number of tests on
 # arguments of appropriate shapes and dtypes using the following table.
 
-float_dtypes = [onp.float32, onp.float64]
+float_dtypes = list(jtu.supported_dtypes().intersection({onp.float16, onp.float32, onp.float64}))
 complex_dtypes = [onp.complex64, onp.complex128]
 inexact_dtypes = float_dtypes + complex_dtypes
 int_dtypes = [onp.int32, onp.int64]
@@ -67,71 +67,103 @@ OpRecord = collections.namedtuple("OpRecord",
                                   ["op", "nargs", "dtypes", "rng", "tol"])
 
 
-def op_record(op, nargs, dtypes, rng, tol=1e-5):
+default_tolerance = {
+  onp.bool_: 0,
+  onp.int16: 0,
+  onp.int32: 0,
+  onp.int64: 0,
+  onp.float16: 1e-3,
+  onp.float32: 1e-6,
+  onp.float64: 1e-15,
+  onp.complex64: 1e-6,
+  onp.complex128: 1e-15,
+}
+
+def tolerance(dtype, tol=None):
+  if not FLAGS.jax_enable_x64:
+    if dtype == onp.float64:
+      dtype = onp.float32
+    elif dtype == onp.complex128:
+      dtype = onp.complex64
+  tol = tol or {}
+  return tol.get(dtype, default_tolerance[dtype])
+
+def op_record(op, nargs, dtypes, rng, tol=None):
   return OpRecord(op, nargs, dtypes, rng, tol)
 
 LAX_OPS = [
-    op_record(lax.neg, 1, default_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.sign, 1, default_dtypes, jtu.rand_small()),
-    op_record(lax.floor, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.ceil, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.round, 1, float_dtypes, jtu.rand_default()),
+    op_record("neg", 1, default_dtypes + complex_dtypes, jtu.rand_small()),
+    op_record("sign", 1, default_dtypes, jtu.rand_small()),
+    op_record("floor", 1, float_dtypes, jtu.rand_small()),
+    op_record("ceil", 1, float_dtypes, jtu.rand_small()),
+    op_record("round", 1, float_dtypes, jtu.rand_default()),
 
-    op_record(lax.is_finite, 1, float_dtypes, jtu.rand_small()),
+    op_record("is_finite", 1, float_dtypes, jtu.rand_small()),
 
-    op_record(lax.exp, 1, float_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.expm1, 1, float_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.log, 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
-    op_record(lax.log1p, 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
-    op_record(lax.tanh, 1, float_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.sin, 1, float_dtypes + complex_dtypes, jtu.rand_default()),
-    op_record(lax.cos, 1, float_dtypes + complex_dtypes, jtu.rand_default()),
-    op_record(lax.atan2, 2, float_dtypes, jtu.rand_default()),
+    op_record("exp", 1, float_dtypes + complex_dtypes, jtu.rand_small()),
 
-    op_record(lax.sqrt, 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
-    op_record(lax.rsqrt, 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
-    op_record(lax.square, 1, float_dtypes + complex_dtypes, jtu.rand_default()),
-    op_record(lax.reciprocal, 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
-    op_record(lax.tan, 1, float_dtypes, jtu.rand_default()),
-    op_record(lax.asin, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.acos, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.atan, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.sinh, 1, float_dtypes + complex_dtypes, jtu.rand_default()),
-    op_record(lax.cosh, 1, float_dtypes + complex_dtypes, jtu.rand_default()),
+    # TODO(b/142975473): on CPU, expm1 for float64 is only accurate to ~float32
+    # precision.
+    op_record("expm1", 1, float_dtypes + complex_dtypes, jtu.rand_small(),
+              {onp.float64: 1e-8}),
+    op_record("log", 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
+    op_record("log1p", 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
+    # TODO(b/142975473): on CPU, expm1 for complex128 is only accurate to
+    # ~float32 precision.
+    op_record("tanh", 1, float_dtypes + complex_dtypes, jtu.rand_small(),
+              {onp.complex128: 1e-8}),
+    op_record("sin", 1, float_dtypes + complex_dtypes, jtu.rand_default()),
+    op_record("cos", 1, float_dtypes + complex_dtypes, jtu.rand_default()),
+    op_record("atan2", 2, float_dtypes, jtu.rand_default()),
 
-    op_record(lax.lgamma, 1, float_dtypes, jtu.rand_positive()),
-    op_record(lax.digamma, 1, float_dtypes, jtu.rand_positive()),
-    op_record(lax.erf, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.erfc, 1, float_dtypes, jtu.rand_small()),
-    op_record(lax.erf_inv, 1, float_dtypes, jtu.rand_small(), tol=1e-2),
+    op_record("sqrt", 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
+    op_record("rsqrt", 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
+    op_record("square", 1, float_dtypes + complex_dtypes, jtu.rand_default()),
+    op_record("reciprocal", 1, float_dtypes + complex_dtypes, jtu.rand_positive()),
+    op_record("tan", 1, float_dtypes, jtu.rand_default(),
+               {onp.float32: 1e-5}),
+    op_record("asin", 1, float_dtypes, jtu.rand_small()),
+    op_record("acos", 1, float_dtypes, jtu.rand_small()),
+    op_record("atan", 1, float_dtypes, jtu.rand_small()),
+    op_record("sinh", 1, float_dtypes + complex_dtypes, jtu.rand_default()),
+    op_record("cosh", 1, float_dtypes + complex_dtypes, jtu.rand_default()),
 
-    op_record(lax.real, 1, complex_dtypes, jtu.rand_default()),
-    op_record(lax.imag, 1, complex_dtypes, jtu.rand_default()),
-    op_record(lax.complex, 2, [onp.float32], jtu.rand_default()),
-    op_record(lax.conj, 1, [onp.float32] + complex_dtypes, jtu.rand_default()),
-    op_record(lax.abs, 1, default_dtypes + complex_dtypes, jtu.rand_default()),
-    op_record(lax.pow, 2, float_dtypes + complex_dtypes, jtu.rand_positive()),
+    op_record("lgamma", 1, float_dtypes, jtu.rand_positive(),
+              {onp.float32: 1e-5, onp.float64: 1e-14}),
+    op_record("digamma", 1, float_dtypes, jtu.rand_positive()),
+    op_record("erf", 1, float_dtypes, jtu.rand_small()),
+    op_record("erfc", 1, float_dtypes, jtu.rand_small()),
+    op_record("erf_inv", 1, float_dtypes, jtu.rand_small(),
+              {onp.float64: 1e-9}),
 
-    op_record(lax.bitwise_and, 2, bool_dtypes, jtu.rand_small()),
-    op_record(lax.bitwise_not, 1, bool_dtypes, jtu.rand_small()),
-    op_record(lax.bitwise_or, 2, bool_dtypes, jtu.rand_small()),
-    op_record(lax.bitwise_xor, 2, bool_dtypes, jtu.rand_small()),
+    op_record("real", 1, complex_dtypes, jtu.rand_default()),
+    op_record("imag", 1, complex_dtypes, jtu.rand_default()),
+    op_record("complex", 2, [onp.float32, onp.float64], jtu.rand_default()),
+    op_record("conj", 1, [onp.float32, onp.float64] + complex_dtypes,
+              jtu.rand_default()),
+    op_record("abs", 1, default_dtypes + complex_dtypes, jtu.rand_default()),
+    op_record("pow", 2, float_dtypes + complex_dtypes, jtu.rand_positive()),
 
-    op_record(lax.add, 2, default_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.sub, 2, default_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.mul, 2, default_dtypes + complex_dtypes, jtu.rand_small()),
-    op_record(lax.div, 2, default_dtypes + complex_dtypes, jtu.rand_nonzero()),
-    op_record(lax.rem, 2, default_dtypes, jtu.rand_nonzero()),
+    op_record("bitwise_and", 2, bool_dtypes, jtu.rand_small()),
+    op_record("bitwise_not", 1, bool_dtypes, jtu.rand_small()),
+    op_record("bitwise_or", 2, bool_dtypes, jtu.rand_small()),
+    op_record("bitwise_xor", 2, bool_dtypes, jtu.rand_small()),
 
-    op_record(lax.max, 2, all_dtypes, jtu.rand_small()),
-    op_record(lax.min, 2, all_dtypes, jtu.rand_small()),
+    op_record("add", 2, default_dtypes + complex_dtypes, jtu.rand_small()),
+    op_record("sub", 2, default_dtypes + complex_dtypes, jtu.rand_small()),
+    op_record("mul", 2, default_dtypes + complex_dtypes, jtu.rand_small()),
+    op_record("div", 2, default_dtypes + complex_dtypes, jtu.rand_nonzero()),
+    op_record("rem", 2, default_dtypes, jtu.rand_nonzero()),
 
-    op_record(lax.eq, 2, all_dtypes, jtu.rand_some_equal()),
-    op_record(lax.ne, 2, all_dtypes, jtu.rand_small()),
-    op_record(lax.ge, 2, default_dtypes, jtu.rand_small()),
-    op_record(lax.gt, 2, default_dtypes, jtu.rand_small()),
-    op_record(lax.le, 2, default_dtypes, jtu.rand_small()),
-    op_record(lax.lt, 2, default_dtypes, jtu.rand_small()),
+    op_record("max", 2, all_dtypes, jtu.rand_small()),
+    op_record("min", 2, all_dtypes, jtu.rand_small()),
+
+    op_record("eq", 2, all_dtypes, jtu.rand_some_equal()),
+    op_record("ne", 2, all_dtypes, jtu.rand_small()),
+    op_record("ge", 2, default_dtypes, jtu.rand_small()),
+    op_record("gt", 2, default_dtypes, jtu.rand_small()),
+    op_record("le", 2, default_dtypes, jtu.rand_small()),
+    op_record("lt", 2, default_dtypes, jtu.rand_small()),
 ]
 
 CombosWithReplacement = itertools.combinations_with_replacement
@@ -143,30 +175,32 @@ class LaxTest(jtu.JaxTestCase):
   @parameterized.named_parameters(itertools.chain.from_iterable(
       jtu.cases_from_list(
         {"testcase_name": jtu.format_test_name_suffix(
-            rec.op.__name__, shapes, itertools.repeat(dtype)),
-         "op": rec.op, "rng": rec.rng, "shapes": shapes, "dtype": dtype}
+            rec.op, shapes, itertools.repeat(dtype)),
+         "op_name": rec.op, "rng": rec.rng, "shapes": shapes, "dtype": dtype}
         for shape_group in compatible_shapes
         for shapes in CombosWithReplacement(shape_group, rec.nargs)
         for dtype in rec.dtypes)
       for rec in LAX_OPS))
-  def testOp(self, op, rng, shapes, dtype):
+  def testOp(self, op_name, rng, shapes, dtype):
+    op = getattr(lax, op_name)
     args_maker = lambda: [rng(shape, dtype) for shape in shapes]
     self._CompileAndCheck(op, args_maker, check_dtypes=True)
 
   @parameterized.named_parameters(itertools.chain.from_iterable(
       jtu.cases_from_list(
         {"testcase_name": jtu.format_test_name_suffix(
-            rec.op.__name__, shapes, itertools.repeat(dtype)),
-         "op": rec.op, "rng": rec.rng, "shapes": shapes, "dtype": dtype,
+            rec.op, shapes, itertools.repeat(dtype)),
+         "op_name": rec.op, "rng": rec.rng, "shapes": shapes, "dtype": dtype,
          "tol": rec.tol}
         for shape_group in compatible_shapes
         for shapes in CombosWithReplacement(shape_group, rec.nargs)
         for dtype in rec.dtypes)
       for rec in LAX_OPS))
-  def testOpAgainstNumpy(self, op, rng, shapes, dtype, tol):
+  def testOpAgainstNumpy(self, op_name, rng, shapes, dtype, tol):
     args_maker = lambda: [rng(shape, dtype) for shape in shapes]
-    numpy_op = getattr(lax_reference, op.__name__)
-    self._CheckAgainstNumpy(op, numpy_op, args_maker, tol=tol)
+    op = getattr(lax, op_name)
+    numpy_op = getattr(lax_reference, op_name)
+    self._CheckAgainstNumpy(op, numpy_op, args_maker, tol=tolerance(dtype, tol))
 
   # TODO test shift_left, shift_right_arithmetic, shift_right_logical
 
@@ -609,7 +643,10 @@ class LaxTest(jtu.JaxTestCase):
       for rng in [jtu.rand_default()]))
   def testDotAgainstNumpy(self, lhs_shape, rhs_shape, dtype, rng):
     args_maker = lambda: [rng(lhs_shape, dtype), rng(rhs_shape, dtype)]
-    self._CheckAgainstNumpy(lax.dot, lax_reference.dot, args_maker)
+    tol = {onp.float16: 1e-2,
+           onp.float64: max(default_tolerance[onp.float64], 1e-14)}
+    self._CheckAgainstNumpy(lax.dot, lax_reference.dot, args_maker,
+                            tol=tolerance(dtype, tol))
 
   @parameterized.named_parameters(jtu.cases_from_list(
       {"testcase_name":
@@ -1618,7 +1655,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
   def testOpGrad(self, op, rng, shapes, dtype, order, tol):
     if jtu.device_under_test() == "tpu" and op is lax.pow:
       raise SkipTest("pow grad imprecise on tpu")
-    tol = 1e-1 if num_float_bits(dtype) == 32 else tol
+    tol = 1e-1 if num_float_bits(dtype) <= 32 else tol
     args = tuple(rng(shape, dtype) for shape in shapes)
     check_grads(op, args, order, ["fwd", "rev"], tol, tol)
 
@@ -1676,7 +1713,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dim in range(len(base_shape))
       for rng in [jtu.rand_default()]))
   def testConcatenateGrad(self, dim, base_shape, dtype, num_arrs, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
     shapes = [base_shape[:dim] + (size,) + base_shape[dim+1:]
               for size, _ in zip(itertools.cycle([3, 1, 4]), range(num_arrs))]
     operands = tuple(rng(shape, dtype) for shape in shapes)
@@ -1777,7 +1814,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
   def testConvGeneralDilatedGrad(self, lhs_shape, rhs_shape, dtype, strides,
                                  padding, lhs_dil, rhs_dil, dimension_numbers,
                                  perms, feature_group_count, rng):
-    tol = 1e-1 if onp.finfo(dtype).bits == 32 else 1e-3
+    tol = 1e-1 if onp.finfo(dtype).bits <= 32 else 1e-3
 
     # permute shapes to match dim_spec, scale by feature_group_count
     lhs_perm, rhs_perm = perms
@@ -1806,7 +1843,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for lhs_shape in [(2,), (3, 2)] for rhs_shape in [(2,), (2, 4)]
       for dtype in float_dtypes))
   def testDotGrad(self, lhs_shape, rhs_shape, dtype, rng):
-    tol = 1e-1 if num_float_bits(dtype) == 32 else 1e-3
+    tol = 1e-1 if num_float_bits(dtype) <= 32 else 1e-3
     lhs = rng(lhs_shape, dtype)
     rhs = rng(rhs_shape, dtype)
     dot = partial(lax.dot, precision=lax.Precision.HIGHEST)
@@ -1835,7 +1872,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dtype in float_dtypes))
   def testDotGeneralContractAndBatchGrads(self, lhs_shape, rhs_shape, dtype,
                                           dimension_numbers, rng):
-    tol = 1e-1 if onp.finfo(dtype).bits == 32 else 1e-2
+    tol = 1e-1 if onp.finfo(dtype).bits <= 32 else 1e-2
     lhs = rng(lhs_shape, dtype)
     rhs = rng(rhs_shape, dtype)
     dot_general = partial(lax.dot_general, dimension_numbers=dimension_numbers,
@@ -1858,7 +1895,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for broadcast_sizes in [(), (2,), (1, 2)]
       for rng in [jtu.rand_default()]))
   def testBroadcastGrad(self, shape, dtype, broadcast_sizes, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 2e-2 if onp.finfo(dtype).bits <= 32 else None
     args = (rng(shape, dtype),)
     broadcast = lambda x: lax.broadcast(x, broadcast_sizes)
     check_grads(broadcast, args, 2, ["fwd", "rev"], tol, tol, tol)
@@ -1878,7 +1915,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dtype in float_dtypes
       for rng in [jtu.rand_default()]))
   def testBroadcastInDimGrad(self, inshape, dtype, outshape, dimensions, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(inshape, dtype)
     broadcast_in_dim = lambda x: lax.broadcast_in_dim(x, outshape, dimensions)
     check_grads(broadcast_in_dim, (operand,), 2, ["fwd", "rev"], tol, tol, tol)
@@ -1904,7 +1941,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       ]
       for rng in [jtu.rand_default()]))
   def testReshapeGrad(self, arg_shape, out_shape, permutation, dtype, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 2e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(arg_shape, dtype)
     reshape = lambda x: lax.reshape(x, out_shape, permutation)
     check_grads(reshape, (operand,), 2, ["fwd", "rev"], tol, tol, tol)
@@ -1917,7 +1954,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dtype in float_dtypes
       for pads in [[(1, 2, 1), (0, 1, 0)], [(-1, 0, 0), (-1, 0, 2)]]))
   def testPadGrad(self, shape, dtype, pads, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
 
     operand = rng(shape, dtype)
     pad = lambda operand: lax.pad(operand, onp.array(0, dtype), pads)
@@ -1948,7 +1985,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dtype in float_dtypes
       for rng in [jtu.rand_default()]))
   def testSelectGrad(self, pred_shape, arg_shape, dtype, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 2e-2 if onp.finfo(dtype).bits <= 32 else None
     pred = rng(pred_shape, onp.bool_)
     on_true = rng(arg_shape, dtype)
     on_false = rng(arg_shape, dtype)
@@ -1976,7 +2013,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dtype in float_dtypes
       for rng in [jtu.rand_default()]))
   def testSliceGrad(self, shape, dtype, starts, limits, strides, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 2e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(shape, dtype)
     slice = lambda x: lax.slice(x, starts, limits, strides)
     check_grads(slice, (operand,), 2, ["fwd", "rev"], tol, tol, tol)
@@ -1996,7 +2033,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for rng in [jtu.rand_default()]))
   def testDynamicSliceGrad(self, shape, dtype, start_indices, size_indices,
                            rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(shape, dtype)
     dynamic_slice = lambda x: lax.dynamic_slice(x, start_indices, size_indices)
     check_grads(dynamic_slice, (operand,), 2, ["fwd", "rev"], tol, tol, tol)
@@ -2016,7 +2053,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for rng in [jtu.rand_default()]))
   def testDynamicUpdateSliceGrad(self, shape, dtype, start_indices,
                                  update_shape, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(shape, dtype)
     update = rng(update_shape, dtype)
     start_indices = onp.array(start_indices)
@@ -2043,7 +2080,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for dtype in float_dtypes
       for rng in [jtu.rand_default()]))
   def testTransposeGrad(self, shape, dtype, perm, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 5e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(shape, dtype)
     transpose = lambda x: lax.transpose(x, perm)
     check_grads(transpose, (operand,), 2, ["fwd", "rev"], tol, tol, tol)
@@ -2072,7 +2109,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
   def testReduceGrad(self, op, init_val, shape, dtype, dims, rng):
     if jtu.device_under_test() == "tpu" and op is lax.mul:
       raise SkipTest("unimplemented case")
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(shape, dtype)
     init_val = onp.asarray(init_val, dtype=dtype)
     reduce = lambda operand: lax.reduce(operand, init_val, op, dims)
@@ -2139,7 +2176,7 @@ class LaxAutodiffTest(jtu.JaxTestCase):
       for axis in [len(shape) - 1]
       for rng in [jtu.rand_default()]))
   def testSortGrad(self, shape, dtype, axis, rng):
-    tol = 1e-2 if onp.finfo(dtype).bits == 32 else None
+    tol = 1e-2 if onp.finfo(dtype).bits <= 32 else None
     operand = rng(shape, dtype)
     sort = lambda x: lax.sort(x, axis)
     check_grads(sort, (operand,), 2, ["fwd", "rev"], tol, tol, tol)
@@ -2346,17 +2383,17 @@ class LaxVmapTest(jtu.JaxTestCase):
   @parameterized.named_parameters(itertools.chain.from_iterable(
       jtu.cases_from_list(
         {"testcase_name": "{}_bdims={}".format(
-            jtu.format_test_name_suffix(rec.op.__name__, shapes,
+            jtu.format_test_name_suffix(rec.op, shapes,
                                         itertools.repeat(dtype)), bdims),
-         "op": rec.op, "rng": rec.rng, "shapes": shapes, "dtype": dtype,
+         "op_name": rec.op, "rng": rec.rng, "shapes": shapes, "dtype": dtype,
          "bdims": bdims}
         for shape_group in compatible_shapes
         for shapes in CombosWithReplacement(shape_group, rec.nargs)
         for bdims in all_bdims(*shapes)
         for dtype in rec.dtypes)
       for rec in LAX_OPS))
-  def testOp(self, op, rng, shapes, dtype, bdims):
-    self._CheckBatching(op, 10, bdims, shapes, dtype, rng)
+  def testOp(self, op_name, rng, shapes, dtype, bdims):
+    self._CheckBatching(getattr(lax, op_name), 10, bdims, shapes, dtype, rng)
 
   @parameterized.named_parameters(jtu.cases_from_list(
       {"testcase_name":
@@ -2399,7 +2436,7 @@ class LaxVmapTest(jtu.JaxTestCase):
   def testConvGeneralDilatedBatching(
       self, lhs_shape, rhs_shape, dtype, strides, padding, lhs_dil, rhs_dil,
       dimension_numbers, perms, feature_group_count, lhs_bdim, rhs_bdim, rng):
-    tol = 1e-1 if onp.finfo(dtype).bits == 32 else 1e-3
+    tol = 1e-1 if onp.finfo(dtype).bits <= 32 else 1e-3
 
     # permute shapes to match dim_spec, scale by feature_group_count
     lhs_perm, rhs_perm = perms
@@ -2479,7 +2516,8 @@ class LaxVmapTest(jtu.JaxTestCase):
       for dtype in default_dtypes
       for rng in [jtu.rand_default()]))
   def testDot(self, lhs_shape, rhs_shape, dtype, bdims, rng):
-    self._CheckBatching(lax.dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng)
+    self._CheckBatching(lax.dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng,
+                        rtol=tolerance(dtype, {onp.float16: 2e-2}))
 
   @parameterized.named_parameters(jtu.cases_from_list(
       {"testcase_name":
