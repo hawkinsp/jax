@@ -47,7 +47,8 @@ from six.moves import builtins, xrange
 
 from jax import jit, device_put, custom_transforms, defjvp
 from .. import core
-from ..abstract_arrays import UnshapedArray, ShapedArray, ConcreteArray
+from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray,
+                               AbstractPythonScalar, python_scalar_types)
 from ..config import flags
 from ..interpreters.xla import DeviceArray
 from .. import lax
@@ -113,12 +114,28 @@ class ndarray(six.with_metaclass(_ArrayMeta, onp.ndarray)):
     raise TypeError("jax.numpy.ndarray() should not be instantiated explicitly."
                     " Use jax.numpy.array, or jax.numpy.zeros instead.")
 
+_python_scalar_types = tuple(python_scalar_types)
 
-isscalar = onp.isscalar
+def _is_python_scalar(x):
+  try:
+    return isinstance(x.aval, AbstractPythonScalar)
+  except AttributeError:
+    return isinstance(x, _python_scalar_types)
+
+def isscalar(num):
+  return _is_python_scalar(num) or onp.isscalar(num)
+
+def shape(x):
+  return () if isscalar(x) else onp.shape(x)
+
+def ndim(x):
+  return 0 if isscalar(x) else onp.ndim(x)
+
+_shape = shape
+_ndim = ndim
+
 iscomplexobj = onp.iscomplexobj
 
-shape = _shape = onp.shape
-ndim = _ndim = onp.ndim
 size = onp.size
 _dtype = lax.dtype
 
@@ -206,7 +223,12 @@ def _promote_dtypes(*args):
   if len(args) < 2:
     return args
   else:
-    from_dtypes = map(_dtype, args)
+    python_scalars = []
+    arrays = []
+    for arg in args:
+      (python_scalars if _is_python_scalar(arg) else arrays).append(arg)
+
+    from_dtypes = map(_dtype, arrays or python_scalars)
     to_dtype = xla_bridge.canonicalize_dtype(result_type(*from_dtypes))
     return [lax.convert_element_type(x, to_dtype)
             if _dtype(x) != to_dtype else x for x in args]
@@ -223,11 +245,13 @@ def _result_dtype(op, *args):
   return _dtype(op(*args))
 
 
+def _not_array(x):
+  return not isinstance(x, ndarray) and not isscalar(x)
+
 def _check_arraylike(fun_name, *args):
   """Check if all args fit JAX's definition of arraylike (ndarray or scalar)."""
-  not_array = lambda x: not isinstance(x, ndarray) and not onp.isscalar(x)
-  if _any(not_array(arg) for arg in args):
-    pos, arg = next((i, arg) for i, arg in enumerate(args) if not_array(arg))
+  if _any(_not_array(arg) for arg in args):
+    pos, arg = next((i, arg) for i, arg in enumerate(args) if _not_array(arg))
     msg = "{} requires ndarray or scalar arguments, got {} at position {}."
     raise TypeError(msg.format(fun_name, type(arg), pos))
 

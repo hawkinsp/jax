@@ -31,8 +31,10 @@ from .. import core
 from .. import ad_util
 from .. import tree_util
 from .. import linear_util as lu
+from .. import abstract_arrays
 from ..abstract_arrays import (ConcreteArray, ShapedArray, AbstractToken,
-                               make_shaped_array, array_types, raise_to_shaped,
+                               AbstractPythonScalar, ConcretePythonScalar,
+                               make_shaped_array, raise_to_shaped,
                                abstract_token)
 from ..core import valid_jaxtype, Literal
 from ..util import partial, partialmethod, cache, safe_map, prod, unzip2
@@ -66,6 +68,8 @@ xla_shape_handlers = {}
 xla_shape_handlers[core.AbstractUnit] = lambda _: xc.Shape.tuple_shape(())
 xla_shape_handlers[ShapedArray] = lambda a: xc.Shape.array_shape(a.dtype, a.shape)
 xla_shape_handlers[ConcreteArray] = lambda a: xc.Shape.array_shape(a.dtype, a.shape)
+xla_shape_handlers[AbstractPythonScalar] = lambda a: xc.Shape.array_shape(a.dtype, ())
+xla_shape_handlers[ConcretePythonScalar] = lambda a: xc.Shape.array_shape(a.dtype, ())
 
 def aval_to_result_handler(aval):
   try:
@@ -91,7 +95,7 @@ device_put_handlers[core.Unit] = \
         (), device, backend=xb.get_backend(backend))
 def _device_put_array(x, device, backend=None):
   return xc.Buffer.from_pyval(x, device, backend=xb.get_backend(backend))
-for _t in array_types:
+for _t in abstract_arrays.array_types:
   device_put_handlers[_t] = _device_put_array
 
 # TODO(mattjj): try to remove this canonicalize_dtype stuff
@@ -104,7 +108,9 @@ canonicalize_dtype_handlers = {}
 canonicalize_dtype_handlers[core.Unit] = identity
 def _canonicalize_ndarray_dtype(x):
   return onp.asarray(x, xb.canonicalize_dtype(onp.result_type(x)))
-for _t in array_types:
+for _t in abstract_arrays.array_types:
+  canonicalize_dtype_handlers[_t] = _canonicalize_ndarray_dtype
+for _t in abstract_arrays.python_scalar_types:
   canonicalize_dtype_handlers[_t] = _canonicalize_ndarray_dtype
 
 def abstractify(x):
@@ -114,8 +120,10 @@ def abstractify(x):
     raise TypeError("No abstraction handler for type: {}".format(type(x)))
 pytype_aval_mappings = {}
 pytype_aval_mappings[core.Unit] = lambda _: core.abstract_unit
-for _t in array_types:
+for _t in abstract_arrays.array_types:
   pytype_aval_mappings[_t] = make_shaped_array
+for _t in abstract_arrays.python_scalar_types:
+  pytype_aval_mappings[_t] = abstract_arrays.make_abstract_python_scalar
 
 
 ### op-by-op execution

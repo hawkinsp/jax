@@ -164,6 +164,68 @@ class ConcreteArray(ShapedArray):
     return str(self.val)
 
 
+class PythonScalarKind(object):
+  BOOL = 1
+  INT = 2
+  FLOAT = 3
+  COMPLEX = 4
+
+  def of(val):
+    if isinstance(val, bool):
+      return PythonScalarKind.BOOL
+    elif isinstance(val, int):
+      return PythonScalarKind.INT
+    elif isinstance(val, float):
+      return PythonScalarKind.FLOAT
+    elif isinstance(val, complex):
+      return PythonScalarKind.COMPLEX
+    elif six.PY2 and isinstance(val, long):
+      return PythonScalarKind.INT
+    else:
+      raise ValueError("{} is not a Python scalar.".format(val))
+
+class AbstractPythonScalar(core.AbstractValue):
+  def __init__(self, kind):
+    self.kind = kind
+
+  def __repr__(self):
+    return "AbstractPythonScalar({})".format(self.kind)
+
+  @property
+  def dtype(self):
+    if self.kind == PythonScalarKind.BOOL:
+      return onp.bool_
+    elif self.kind == PythonScalarKind.INT:
+      return xla_bridge.canonicalize_dtype(onp.int64)
+    elif self.kind == PythonScalarKind.FLOAT:
+      return xla_bridge.canonicalize_dtype(onp.float64)
+    elif self.kind == PythonScalarKind.COMPLEX:
+      return xla_bridge.canonicalize_dtype(onp.complex128)
+    else:
+      raise ValueError("Invalid PythonScalar kind")
+
+  def as_shaped_array(self):
+    return ShapedArray((), self.dtype)
+
+  def as_array(self):
+    return ShapedArray((), self.dtype)
+
+
+class ConcretePythonScalar(AbstractPythonScalar):
+  def __init__(self, val):
+    super(ConcretePythonScalar, self).__init__(PythonScalarKind.of(val))
+    self.val = val
+
+  def __repr__(self):
+    return "ConcretePythonScalar({})".format(self.val)
+
+  def at_least_vspace(self):
+    return self.as_shaped_array()
+
+  def as_array(self):
+    return ConcreteArray(onp.asarray(self.val))
+
+
 class AbstractToken(core.AbstractValue): pass
 
 abstract_token = AbstractToken()
@@ -181,14 +243,25 @@ array_types = {onp.ndarray, onp.float64, onp.float32, onp.float16,
                onp.complex64, onp.complex128,
                onp.int64, onp.int32, onp.int16, onp.int8,
                onp.bool_, onp.uint64, onp.uint32, onp.uint16, onp.uint8,
-               onp.longlong, complex, float, int, bool}
-
-if six.PY2:
-  array_types.add(long)  # noqa: F821
+               onp.longlong}
 
 for t in array_types:
   core.pytype_aval_mappings[t] = ConcreteArray
   ad_util.jaxval_zeros_likers[t] = zeros_like_array
+
+
+def make_abstract_python_scalar(val):
+  return AbstractPythonScalar(PythonScalarKind.of(val))
+
+python_scalar_types = {complex, float, int, bool}
+
+if six.PY2:
+  python_scalar_types.add(long)  # noqa: F821
+
+for t in python_scalar_types:
+  core.pytype_aval_mappings[t] = ConcretePythonScalar
+  # TODO(phawkins): is this needed?
+  # ad_util.jaxval_zeros_likers[t] = zeros_like_array
 
 
 def zeros_like_shaped_array(aval):

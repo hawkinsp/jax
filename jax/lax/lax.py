@@ -38,6 +38,7 @@ from .. import linear_util as lu
 from ..config import flags
 from ..core import Primitive
 from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray,
+                               AbstractPythonScalar,
                                AbstractToken, array_types, make_shaped_array,
                                raise_to_shaped, abstract_token)
 from ..interpreters import partial_eval as pe
@@ -1477,6 +1478,7 @@ def standard_reduction_primitive(shape_rule, dtype_rule, name, translation_rule=
 
 
 def standard_abstract_eval(shape_rule, dtype_rule, *args, **kwargs):
+  args = [x.as_array() if isinstance(x, AbstractPythonScalar) else x for x in args]
   assert all(isinstance(arg, UnshapedArray) for arg in args), args
   least_specialized = _max(
       map(type, args), key=operator.attrgetter('array_abstraction_level'))
