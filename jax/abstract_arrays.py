@@ -38,10 +38,56 @@ def concretization_function_error(fun):
     raise TypeError(concretization_err_msg(fun))
   return error
 
+# TODO(phawkins): use an enum when we drop Python 2.7 support.
+class TypeCategory(object):
+  def __init__(self, priority, name, default_dtype):
+    self.priority = priority
+    self.name = name
+    self.default_dtype = default_dtype
+
+  def __repr__(self):
+    return "TypeCategory({})".format(self.name)
+
+  def __str__(self):
+    return self.name
+
+  @classmethod
+  def of_scalar(cls, val):
+    if isinstance(val, bool):
+      return cls.BOOL
+    elif isinstance(val, int):
+      return cls.INT
+    elif isinstance(val, float):
+      return cls.FLOAT
+    elif isinstance(val, complex):
+      return cls.COMPLEX
+    elif six.PY2:
+      if isinstance(val, long):
+        return cls.INT
+    raise ValueError("{} is not a Python scalar.".format(val))
+
+  @classmethod
+  def of_dtype(cls, dtype):
+    if onp.issubdtype(dtype, onp.bool_):
+      return cls.BOOL
+    elif onp.issubdtype(dtype, onp.integer):
+      return cls.INT
+    elif onp.issubdtype(dtype, onp.floating):
+      return cls.FLOAT
+    elif onp.issubdtype(dtype, onp.complexfloating):
+      return cls.COMPLEX
+    else:
+      raise ValueError("{} is not a dtype known to JAX.".format(dtype))
+
+
+TypeCategory.BOOL = TypeCategory(0, "bool", onp.dtype(onp.bool_))
+TypeCategory.INT = TypeCategory(1, "int", onp.dtype(onp.int32))
+TypeCategory.FLOAT = TypeCategory(2, "float", onp.dtype(onp.float32))
+TypeCategory.COMPLEX = TypeCategory(3, "complex", onp.dtype(onp.complex64))
 
 class UnshapedArray(core.AbstractValue):
   __slots__ = ['dtype']
-  array_abstraction_level = 3
+  array_abstraction_level = 4
 
   def __init__(self, dtype):
     self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(dtype))
@@ -85,7 +131,7 @@ class UnshapedArray(core.AbstractValue):
 
 class ShapedArray(UnshapedArray):
   __slots__ = ['shape']
-  array_abstraction_level = 2
+  array_abstraction_level = 3
 
   def __init__(self, shape, dtype):
     self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(dtype))
@@ -128,10 +174,45 @@ class ShapedArray(UnshapedArray):
   def _len(self, ignored_tracer):
     return len(self)
 
+class AbstractPythonScalar(core.AbstractValue):
+  __slots__ = ['kind']
+  array_abstraction_level = 2
+
+  def __init__(self, kind):
+    self.kind = kind
+
+  def __repr__(self):
+    return "AbstractPythonScalar({})".format(self.kind)
+
+  def __eq__(self, other):
+    return type(self) is type(other) and self.kind == other.kind
+
+  def __hash__(self):
+    return hash(self.kind)
+
+  @property
+  def dtype(self):
+    return self.kind.default_dtype
+
+  @property
+  def shape(self):
+    return ()
+  
+  def as_shaped_array(self):
+    return ShapedArray((), self.dtype)
+
+  def as_array(self):
+    return ShapedArray((), self.dtype)
+
+  def join(self, other):
+    if other.kind != kind:
+      raise TypeError(other)
+    return self
+
 
 class ConcreteArray(ShapedArray):
   __slots__ = ['val']
-  array_abstraction_level = 0
+  array_abstraction_level = 1
 
   def __init__(self, val):
     self.val = val
@@ -164,66 +245,34 @@ class ConcreteArray(ShapedArray):
     return str(self.val)
 
 
-class PythonScalarKind(object):
-  BOOL = 1
-  INT = 2
-  FLOAT = 3
-  COMPLEX = 4
-
-  def of(val):
-    if isinstance(val, bool):
-      return PythonScalarKind.BOOL
-    elif isinstance(val, int):
-      return PythonScalarKind.INT
-    elif isinstance(val, float):
-      return PythonScalarKind.FLOAT
-    elif isinstance(val, complex):
-      return PythonScalarKind.COMPLEX
-    elif six.PY2 and isinstance(val, long):
-      return PythonScalarKind.INT
-    else:
-      raise ValueError("{} is not a Python scalar.".format(val))
-
-class AbstractPythonScalar(core.AbstractValue):
-  def __init__(self, kind):
-    self.kind = kind
-
-  def __repr__(self):
-    return "AbstractPythonScalar({})".format(self.kind)
-
-  @property
-  def dtype(self):
-    if self.kind == PythonScalarKind.BOOL:
-      return onp.bool_
-    elif self.kind == PythonScalarKind.INT:
-      return xla_bridge.canonicalize_dtype(onp.int64)
-    elif self.kind == PythonScalarKind.FLOAT:
-      return xla_bridge.canonicalize_dtype(onp.float64)
-    elif self.kind == PythonScalarKind.COMPLEX:
-      return xla_bridge.canonicalize_dtype(onp.complex128)
-    else:
-      raise ValueError("Invalid PythonScalar kind")
-
-  def as_shaped_array(self):
-    return ShapedArray((), self.dtype)
-
-  def as_array(self):
-    return ShapedArray((), self.dtype)
-
-
 class ConcretePythonScalar(AbstractPythonScalar):
+  __slots__ = ['val']
+  array_abstraction_level = 0
+
   def __init__(self, val):
-    super(ConcretePythonScalar, self).__init__(PythonScalarKind.of(val))
+    super(ConcretePythonScalar, self).__init__(TypeCategory.of_scalar(val))
     self.val = val
 
   def __repr__(self):
     return "ConcretePythonScalar({})".format(self.val)
+
+  def __eq__(self, other):
+    return type(self) is type(other) and self.val == other.val
+
+  def __hash__(self):
+    return hash(self.val)
 
   def at_least_vspace(self):
     return self.as_shaped_array()
 
   def as_array(self):
     return ConcreteArray(onp.asarray(self.val))
+
+  def join(self, other):
+    if self == other:
+      return self
+    elif self.kind == other.kind:
+      return AbstractPythonScalar(self.kind)
 
 
 class AbstractToken(core.AbstractValue): pass
@@ -251,7 +300,7 @@ for t in array_types:
 
 
 def make_abstract_python_scalar(val):
-  return AbstractPythonScalar(PythonScalarKind.of(val))
+  return AbstractPythonScalar(TypeCategory.of_scalar(val))
 
 python_scalar_types = {complex, float, int, bool}
 
@@ -260,8 +309,7 @@ if six.PY2:
 
 for t in python_scalar_types:
   core.pytype_aval_mappings[t] = ConcretePythonScalar
-  # TODO(phawkins): is this needed?
-  # ad_util.jaxval_zeros_likers[t] = zeros_like_array
+  ad_util.jaxval_zeros_likers[t] = zeros_like_array
 
 
 def zeros_like_shaped_array(aval):
@@ -273,6 +321,8 @@ ad_util.aval_zeros_likers[ShapedArray] = zeros_like_shaped_array
 def raise_to_shaped(aval):
   if isinstance(aval, ShapedArray):
     return ShapedArray(aval.shape, aval.dtype)
+  elif isinstance(aval, AbstractPythonScalar):
+    return aval.as_shaped_array()
   elif aval is core.abstract_unit:
     return core.abstract_unit
   elif aval is abstract_token:

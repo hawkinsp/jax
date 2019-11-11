@@ -48,7 +48,8 @@ from six.moves import builtins, xrange
 from jax import jit, device_put, custom_transforms, defjvp
 from .. import core
 from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray,
-                               AbstractPythonScalar, python_scalar_types)
+                               AbstractPythonScalar, ConcretePythonScalar,
+                               python_scalar_types, TypeCategory)
 from ..config import flags
 from ..interpreters.xla import DeviceArray
 from .. import lax
@@ -114,29 +115,20 @@ class ndarray(six.with_metaclass(_ArrayMeta, onp.ndarray)):
     raise TypeError("jax.numpy.ndarray() should not be instantiated explicitly."
                     " Use jax.numpy.array, or jax.numpy.zeros instead.")
 
-_python_scalar_types = tuple(python_scalar_types)
-
-def _is_python_scalar(x):
-  try:
-    return isinstance(x.aval, AbstractPythonScalar)
-  except AttributeError:
-    return isinstance(x, _python_scalar_types)
+shape = lax.shape
+ndim = lax.ndim
 
 def isscalar(num):
-  return _is_python_scalar(num) or onp.isscalar(num)
-
-def shape(x):
-  return () if isscalar(x) else onp.shape(x)
-
-def ndim(x):
-  return 0 if isscalar(x) else onp.ndim(x)
+  return lax._is_python_scalar(num) or onp.isscalar(num)
 
 _shape = shape
 _ndim = ndim
 
 iscomplexobj = onp.iscomplexobj
 
-size = onp.size
+def size(x):
+  return 1 if lax._is_python_scalar(x) else onp.size(x)
+
 _dtype = lax.dtype
 
 bool_ = onp.bool_
@@ -223,13 +215,22 @@ def _promote_dtypes(*args):
   if len(args) < 2:
     return args
   else:
-    python_scalars = []
-    arrays = []
+    scalars = []
+    from_dtypes = []
+    priority = -1
     for arg in args:
-      (python_scalars if _is_python_scalar(arg) else arrays).append(arg)
+      if lax._is_python_scalar(arg):
+        scalars.append(arg)
+      else:
+        from_dtypes.append(_dtype(arg))
+        priority = _max(priority, TypeCategory.of_dtype(_dtype(arg)).priority)
+    for s in scalars:
+      category = lax._scalar_type_category(s)
+      if category.priority > priority:
+        from_dtypes.append(category.default_dtype)
 
-    from_dtypes = map(_dtype, arrays or python_scalars)
     to_dtype = xla_bridge.canonicalize_dtype(result_type(*from_dtypes))
+    print("from_dtypes ", from_dtypes, " to_dtype ", to_dtype)
     return [lax.convert_element_type(x, to_dtype)
             if _dtype(x) != to_dtype else x for x in args]
 
@@ -932,7 +933,7 @@ def where(condition, x=None, y=None):
   if not issubdtype(_dtype(condition), onp.bool_):
     condition = lax.ne(condition, zeros_like(condition))
   condition, x, y = broadcast_arrays(condition, x, y)
-  if not onp.size(x):
+  if not size(x):
     empty, _ = _promote_dtypes(x, y)
     return empty
   else:
@@ -986,7 +987,7 @@ def broadcast_to(arr, shape):
 def split(ary, indices_or_sections, axis=0):
   dummy_val = onp.broadcast_to(0, ary.shape)  # zero strides
   subarrays = onp.split(dummy_val, indices_or_sections, axis)  # shapes
-  split_indices = onp.cumsum([0] + [onp.shape(sub)[axis] for sub in subarrays])
+  split_indices = onp.cumsum([0] + [shape(sub)[axis] for sub in subarrays])
   starts, ends = [0] * ndim(ary), shape(ary)
   _subval = lambda x, i, v: lax.subvals(x, [(i, v)])
   return [lax.slice(ary, _subval(starts, axis, start), _subval(ends, axis, end))
@@ -1574,6 +1575,10 @@ def array(object, dtype=None, copy=True, order="K", ndmin=0):
       out = lax.convert_element_type(object, dtype)
     else:
       out = device_put(object)
+  elif isscalar(object):
+    out = lax.reshape(object, ())
+    if dtype and _dtype(out) != xla_bridge.canonicalize_dtype(dtype):
+      out = lax.convert_element_type(out, dtype)
   elif hasattr(object, '__array__'):
     # this case is for duck-typed handling of objects that implement `__array__`
     out = array(object.__array__(), dtype and xla_bridge.canonicalize_dtype(dtype))
@@ -1582,10 +1587,6 @@ def array(object, dtype=None, copy=True, order="K", ndmin=0):
       out = stack([array(elt, dtype=dtype) for elt in object])
     else:
       out = onp.array([], dtype)
-  elif isscalar(object):
-    out = lax.reshape(object, ())
-    if dtype and _dtype(out) != xla_bridge.canonicalize_dtype(dtype):
-      out = lax.convert_element_type(out, dtype)
   else:
     try:
       view = memoryview(object)
@@ -2748,8 +2749,8 @@ def _index_to_gather(x_shape, idx):
     except TypeError:
       abstract_i = None
     # Handle basic int indexes.
-    if (isinstance(abstract_i, ConcreteArray) or
-        isinstance(abstract_i, ShapedArray)) and _int(abstract_i):
+    if (isinstance(abstract_i, (AbstractPythonScalar, ShapedArray)) and
+        _int(abstract_i)):
       i = _normalize_index(i, x_shape[x_axis])
       i = lax.convert_element_type(i, int32)
       i = broadcast_to(i, tuple(gather_indices.shape[:-1]) + (1,))
@@ -2773,8 +2774,10 @@ def _index_to_gather(x_shape, idx):
       x_axis += 1
     # Handle slice index (only static, otherwise an error is raised)
     elif isinstance(i, slice):
-      if not _all(elt is None or type(core.get_aval(elt)) is ConcreteArray
-                  for elt in (i.start, i.stop, i.step)):
+      if not _all(
+        elt is None or
+        isinstance(core.get_aval(elt), (ConcreteArray, ConcretePythonScalar))
+        for elt in (i.start, i.stop, i.step)):
         msg = ("Array slice indices must have static start/stop/step to be used "
                "with Numpy indexing syntax. Try lax.dynamic_slice/"
                "dynamic_update_slice instead.")
@@ -2990,13 +2993,13 @@ def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None,
   if fweights is not None:
     if onp.ndim(fweights) > 1:
       raise RuntimeError("cannot handle multidimensional fweights")
-    if onp.shape(fweights)[0] != X.shape[1]:
+    if shape(fweights)[0] != X.shape[1]:
       raise RuntimeError("incompatible numbers of samples and fweights")
     w = asarray(fweights)
   if aweights is not None:
     if onp.ndim(aweights) > 1:
       raise RuntimeError("cannot handle multidimensional aweights")
-    if onp.shape(aweights)[0] != X.shape[1]:
+    if shape(aweights)[0] != X.shape[1]:
       raise RuntimeError("incompatible numbers of samples and aweights")
     w = aweights if w is None else w * aweights
 
@@ -3210,6 +3213,8 @@ _diff_methods = ["clip", "compress", "conj", "conjugate", "cumprod", "cumsum",
 # Forward operators using a single-underscore-prefix naming convention:
 for operator_name, function in _operators.items():
   setattr(ShapedArray, "_{}".format(operator_name), staticmethod(function))
+  setattr(AbstractPythonScalar, "_{}".format(operator_name), staticmethod(function))
+
 # Forward methods and properties using core.aval_method and core.aval_property:
 for method_name in _nondiff_methods + _diff_methods:
   setattr(ShapedArray, method_name, core.aval_method(globals()[method_name]))

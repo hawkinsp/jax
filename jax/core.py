@@ -492,7 +492,8 @@ class AbstractValue(object):
       return self.__class__.__name__
 
 
-class Bot(AbstractValue): pass
+class Bot(AbstractValue):
+  def join(self, other): return other
 
 bot = Bot()
 
@@ -511,6 +512,15 @@ def lattice_join(x, y):
     return y.join(x)
   elif isinstance(y, type(x)):
     return x.join(y)
+  # There exist abstract values that have lattice relationships but not subclass
+  # relationships. As a hack: test for array_abstraction_level to allow scalars
+  # and arrays to join correctly.
+  elif (hasattr(x, 'array_abstraction_level') and
+        hasattr(y, 'array_abstraction_level')):
+    if x.array_abstraction_level > y.array_abstraction_level:
+      return x.join(y)
+    else:
+      return y.join(x)
   else:
     raise TypeError((x, y))
 

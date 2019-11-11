@@ -859,7 +859,7 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
     Following numpy test suite from `test_repeat` at https://github.com/numpy/numpy/blob/master/numpy/core/tests/test_multiarray.py
     '''
     tol = 1e-5
-    
+  
     def test_single(m, args_maker, repeats, axis):
       lax_ans = lnp.repeat(m, repeats, axis)
       numpy_ans = onp.repeat(m, repeats, axis)

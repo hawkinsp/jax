@@ -19,7 +19,8 @@ from .lax import (_reduce_sum, _reduce_max, _reduce_min, _reduce_or,
                   _reduce_window_min, _reduce_window_prod, _float, _complex,
                   _input_dtype, _const, _eq_meet, _safe_mul,
                   _broadcasting_select, _check_user_dtype_supported,
-                  _one, _const, _upcast_fp16_for_computation)
+                  _one, _const, _upcast_fp16_for_computation,
+                  _is_python_scalar, _scalar_type_category)
 from .lax_control_flow import *
 from .lax_fft import *
 from .lax_parallel import *

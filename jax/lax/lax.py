@@ -40,7 +40,8 @@ from ..core import Primitive
 from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray,
                                AbstractPythonScalar,
                                AbstractToken, array_types, make_shaped_array,
-                               raise_to_shaped, abstract_token)
+                               raise_to_shaped, abstract_token,
+                               python_scalar_types, TypeCategory)
 from ..interpreters import partial_eval as pe
 from ..interpreters import xla
 from ..interpreters import pxla
@@ -60,6 +61,33 @@ _max = builtins.max
 _min = builtins.max
 _reduce = six.moves.reduce
 
+
+_python_scalar_types = tuple(python_scalar_types)
+
+def _is_python_scalar(x):
+  try:
+    return isinstance(x.aval, AbstractPythonScalar)
+  except AttributeError:
+    return isinstance(x, _python_scalar_types)
+
+def _scalar_type_category(x):
+  try:
+    return x.aval.kind
+  except AttributeError:
+    return TypeCategory.of_scalar(x)
+
+def shape(x):
+  return () if _is_python_scalar(x) else onp.shape(x)
+_shape = shape
+
+def ndim(x):
+  return 0 if _is_python_scalar(x) else onp.ndim(x)
+_ndim = ndim
+
+def dtype(x):
+  return (_scalar_type_category(x).default_dtype if _is_python_scalar(x)
+          else onp.result_type(x))
+_dtype = dtype
 
 @cache()
 def broadcast_shapes(*shapes):
@@ -516,9 +544,9 @@ def dot(lhs, rhs, precision=None):
   # TODO(b/134526360): XLA doesn't support integer dots, so we emit a sum of
   # products instead.
   if onp.issubdtype(lhs.dtype, onp.integer):
-    lhs_shape = onp.shape(lhs)
+    lhs_shape = _shape(lhs)
     lhs_ndim = len(lhs_shape)
-    rhs_ndim = onp.ndim(rhs)
+    rhs_ndim = _ndim(rhs)
     if rhs_ndim > 1:
       lhs = broadcast_in_dim(lhs, lhs_shape + (1,), tuple(range(len(lhs_shape))))
     if lhs_ndim > 1:
@@ -560,17 +588,17 @@ def dot_general(lhs, rhs, dimension_numbers, precision=None):
     lhs_contract_dims, rhs_contract_dims = contract_dims
     lhs_batch_dims, rhs_batch_dims = batch_dims
     lhs_noncontract_dims = tuple(sorted(
-      set(range(onp.ndim(lhs))) - set(lhs_batch_dims) - set(lhs_contract_dims)))
+      set(range(_ndim(lhs))) - set(lhs_batch_dims) - set(lhs_contract_dims)))
     rhs_noncontract_dims = tuple(sorted(
-      set(range(onp.ndim(rhs))) - set(rhs_batch_dims) - set(rhs_contract_dims)))
+      set(range(_ndim(rhs))) - set(rhs_batch_dims) - set(rhs_contract_dims)))
     lhs = transpose(lhs,
                     lhs_batch_dims + lhs_noncontract_dims + lhs_contract_dims)
     rhs = transpose(rhs,
                     rhs_batch_dims + rhs_noncontract_dims + rhs_contract_dims)
     new_lhs_shape = onp.insert(
-      onp.shape(lhs), len(lhs_batch_dims) + len(lhs_noncontract_dims),
+      _shape(lhs), len(lhs_batch_dims) + len(lhs_noncontract_dims),
       (1,) * len(rhs_noncontract_dims))
-    new_rhs_shape = onp.insert(onp.shape(rhs), len(lhs_batch_dims),
+    new_rhs_shape = onp.insert(_shape(rhs), len(lhs_batch_dims),
                                (1,) * len(lhs_noncontract_dims))
     lhs = reshape(lhs, new_lhs_shape)
     rhs = reshape(rhs, new_rhs_shape)
@@ -601,7 +629,7 @@ def broadcast(operand, sizes):
   return broadcast_p.bind(operand, sizes=tuple(sizes))
 
 def broadcast_in_dim(operand, shape, broadcast_dimensions):
-  if onp.ndim(operand) == len(shape) and not len(broadcast_dimensions):
+  if _ndim(operand) == len(shape) and not len(broadcast_dimensions):
     return operand
   if any(x < 0 or x >= len(shape) for x in broadcast_dimensions):
     msg = ("broadcast dimensions must be >= 0 and < ndim(shape), got {} for "
@@ -618,15 +646,15 @@ def reshape(operand, new_sizes, dimensions=None):
   """
   new_sizes = _canonicalize_shape(new_sizes)  # TODO
   new_sizes = tuple(new_sizes)
-  same_shape = onp.shape(operand) == new_sizes
-  same_dims = dimensions is None or tuple(dimensions) == tuple(range(onp.ndim(operand)))
-  if onp.shape(operand) and same_shape and same_dims:
+  same_shape = _shape(operand) == new_sizes
+  same_dims = dimensions is None or tuple(dimensions) == tuple(range(_ndim(operand)))
+  if _shape(operand) and same_shape and same_dims:
     return operand
   else:
     return reshape_p.bind(
         operand, new_sizes=new_sizes,
         dimensions=None if same_dims else tuple(dimensions),
-        old_sizes=onp.shape(operand))
+        old_sizes=_shape(operand))
 
 def pad(operand, padding_value, padding_config):
   """Wraps XLA's `Pad
@@ -921,7 +949,7 @@ def _get_min_identity(dtype):
 
 def _reduce_sum(operand, axes):
   return reduce_sum_p.bind(operand, axes=tuple(axes),
-                           input_shape=onp.shape(operand))
+                           input_shape=_shape(operand))
 
 def _reduce_prod(operand, axes):
   return reduce_prod_p.bind(operand, axes=tuple(axes))
@@ -1049,9 +1077,9 @@ def full(shape, fill_value, dtype=None):
            "`static_argnums` or applying `jit` to smaller subfunctions instead.")
     raise TypeError(msg)
 
-  if onp.shape(fill_value):
+  if _shape(fill_value):
     msg = "full must be called with scalar fill_value, got fill_value.shape {}."
-    raise TypeError(msg.format(onp.shape(fill_value)))
+    raise TypeError(msg.format(_shape(fill_value)))
   dtype = dtype or _dtype(fill_value)
   dtype = xla_bridge.canonicalize_dtype(dtype)
 
@@ -1275,7 +1303,7 @@ def full_like(x, fill_value, dtype=None, shape=None):
     An ndarray with the same shape as `x` with its entries set equal to
     `fill_value`, similar to the output of np.full.
   """
-  shape = onp.shape(x) if shape is None else _canonicalize_shape(shape)
+  shape = _shape(x) if shape is None else _canonicalize_shape(shape)
   fill_value = tie_in(x, fill_value)
   return full(shape, fill_value, dtype or _dtype(x))
 
@@ -1565,16 +1593,16 @@ def _brcast(x, *others):
   # Requires shape info during jvp tracing, which isn't strictly necessary.
   # We don't need full numpy broadcasting, but otherwise the logic is the same
   # so we reuse the broadcast_shapes function after filtering out scalars.
-  shapes = tuple(filter(None, map(onp.shape, (x,) + others)))
+  shapes = tuple(filter(None, map(_shape, (x,) + others)))
   shape = shapes and broadcast_shapes(*shapes)
-  if onp.shape(x) != shape:
+  if _shape(x) != shape:
     return _brcast_to(x, shape)
   else:
     return x
 
 
 def _brcast_to(x, shape):
-  x_shape = onp.shape(x)
+  x_shape = _shape(x)
   assert x_shape != shape
   if x_shape:
     assert len(x_shape) == len(shape)
@@ -2474,14 +2502,14 @@ def _reshape_shape_rule(operand, new_sizes, dimensions, **unused_kwargs):
   if not onp.all(onp.greater_equal(new_sizes, 0)):
     msg = 'reshape new_sizes must all be positive, got {}.'
     raise TypeError(msg.format(new_sizes))
-  if prod(onp.shape(operand)) != prod(new_sizes):
+  if prod(_shape(operand)) != prod(new_sizes):
     msg = 'reshape total size must be unchanged, got new_sizes {} for shape {}.'
-    raise TypeError(msg.format(new_sizes, onp.shape(operand)))
+    raise TypeError(msg.format(new_sizes, _shape(operand)))
   if dimensions is not None:
-    if set(dimensions) != set(range(onp.ndim(operand))):
+    if set(dimensions) != set(range(_ndim(operand))):
       msg = ('reshape dimensions must be a permutation of operand dimensions, '
              'got dimensions {} for shape {}.')
-      raise TypeError(msg.format(dimensions, onp.shape(operand)))
+      raise TypeError(msg.format(dimensions, _shape(operand)))
   return tuple(new_sizes)
 
 def _reshape_dtype_rule(operand, new_sizes, dimensions, **unused_kwargs):
@@ -2602,31 +2630,31 @@ def _select_batch_rule(batched_args, batch_dims, **unused_kwargs):
 
   # avoid transposes and some broadcasts in special cases
   if pred_bdim == ot_bdim == of_bdim:
-    if onp.shape(pred) == onp.shape(on_true):
+    if _shape(pred) == _shape(on_true):
       return select(pred, on_true, on_false), pred_bdim
     else:
       # vmapped function had a scalar pred with nonscalar args
-      assert onp.ndim(pred) == 1
+      assert _ndim(pred) == 1
       pred = broadcast_in_dim(pred, on_true.shape, [pred_bdim])
       return select(pred, on_true, on_false), pred_bdim
-  elif onp.ndim(pred) == 0 and ot_bdim is not None and of_bdim is not None:
+  elif _ndim(pred) == 0 and ot_bdim is not None and of_bdim is not None:
     if ot_bdim == of_bdim:
       return select(pred, on_true, on_false), ot_bdim
-    elif onp.shape(on_true) == onp.shape(on_false):
+    elif _shape(on_true) == _shape(on_false):
       on_false = batching.moveaxis(on_false, of_bdim, ot_bdim)
       return select(pred, on_true, on_false), ot_bdim
 
-  pred = batching.bdim_at_front(pred, pred_bdim, size) if onp.shape(pred) else pred
-  if not onp.shape(on_true) == onp.shape(on_false) == ():
+  pred = batching.bdim_at_front(pred, pred_bdim, size) if _shape(pred) else pred
+  if not _shape(on_true) == _shape(on_false) == ():
     on_true = batching.bdim_at_front(on_true, ot_bdim, size)
     on_false = batching.bdim_at_front(on_false, of_bdim, size)
-  assert onp.shape(on_true) == onp.shape(on_false)
-  if 0 < onp.ndim(pred) < onp.ndim(on_true):
+  assert _shape(on_true) == _shape(on_false)
+  if 0 < _ndim(pred) < _ndim(on_true):
     # vmapped function had a scalar pred with nonscalar args
-    assert onp.ndim(pred) == 1
+    assert _ndim(pred) == 1
     pred = broadcast_in_dim(pred, on_true.shape, [0])
-  if onp.ndim(pred) > onp.ndim(on_true):
-    assert onp.ndim(on_true) == 0
+  if _ndim(pred) > _ndim(on_true):
+    assert _ndim(on_true) == 0
     on_true = broadcast(on_true, pred.shape)
     on_false = broadcast(on_false, pred.shape)
   return select(pred, on_true, on_false), 0
@@ -4199,8 +4227,6 @@ xla.translations[outfeed_p] = _outfeed_translation_rule
 
 ### util
 
-_ndim = onp.ndim
-
 
 def _dilate_shape(shape, dilation):
   """Utility function for computing the shape resulting from a dilation."""
@@ -4373,7 +4399,6 @@ _one = partial(full_like, shape=(), fill_value=1)
 _twos = partial(full_like, fill_value=2)
 _two = partial(full_like, shape=(), fill_value=2)
 
-_dtype = dtype = onp.result_type
 _iscomplex = lambda x: onp.issubdtype(_dtype(x), onp.complexfloating)
 
 
