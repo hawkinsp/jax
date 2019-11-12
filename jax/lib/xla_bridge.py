@@ -30,6 +30,7 @@ from distutils.util import strtobool
 from absl import logging
 
 from ..config import flags
+from .. import dtypes
 from .. import util
 import numpy as onp  # 'onp' rather than 'np' to distinguish from autograd.numpy
 import six
@@ -239,7 +240,7 @@ def supported_numpy_dtypes():
 def normalize_to_xla_dtypes(val):
   """Normalize dtypes in a value."""
   if hasattr(val, '__array__') or onp.isscalar(val):
-    return onp.asarray(val, dtype=canonicalize_dtype(onp.result_type(val)))
+    return onp.asarray(val, dtype=canonicalize_dtype(dtypes.dtype(val)))
   elif isinstance(val, (tuple, list)):
     return tuple(normalize_to_xla_dtypes(x) for x in val)
   raise TypeError('Can\'t convert to XLA: {}'.format(val))

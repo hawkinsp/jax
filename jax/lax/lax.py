@@ -34,6 +34,7 @@ from ..util import partial, prod
 from .. import core
 from .. import ad_util
 from .. import api
+from .. import dtypes
 from .. import linear_util as lu
 from ..config import flags
 from ..core import Primitive
@@ -59,6 +60,7 @@ _max = builtins.max
 _min = builtins.max
 _reduce = six.moves.reduce
 
+_dtype = dtype = dtypes.dtype
 
 @cache()
 def broadcast_shapes(*shapes):
@@ -4362,7 +4364,10 @@ def _dynamic_slice_indices(operand, start_indices):
 
 
 def _const(example, val):
-  return onp.array(val, _dtype(example))
+  if dtypes.is_python_scalar(example):
+    return type(example)(val)
+  else:
+    return onp.array(val, _dtype(example))
 
 _zeros = partial(full_like, fill_value=0)
 _zero = partial(full_like, shape=(), fill_value=0)
@@ -4371,7 +4376,6 @@ _one = partial(full_like, shape=(), fill_value=1)
 _twos = partial(full_like, fill_value=2)
 _two = partial(full_like, shape=(), fill_value=2)
 
-_dtype = dtype = onp.result_type
 _iscomplex = lambda x: onp.issubdtype(_dtype(x), onp.complexfloating)
 
 

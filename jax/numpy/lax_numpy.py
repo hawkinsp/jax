@@ -47,6 +47,7 @@ from six.moves import builtins, xrange
 
 from jax import jit, device_put, custom_transforms, defjvp
 from .. import core
+from .. import dtypes
 from ..abstract_arrays import UnshapedArray, ShapedArray, ConcreteArray
 from ..config import flags
 from ..interpreters.xla import DeviceArray
@@ -154,7 +155,7 @@ finfo = onp.finfo
 can_cast = onp.can_cast
 issubdtype = onp.issubdtype
 issubsctype = onp.issubsctype
-result_type = onp.result_type
+result_type = dtypes.result_type
 promote_types = onp.promote_types
 
 ComplexWarning = onp.ComplexWarning
@@ -200,16 +201,32 @@ def _rank_promotion_warning_or_error(fun_name, shapes):
            "https://jax.readthedocs.io/en/latest/rank_promotion_warning.html.")
     raise ValueError(msg.format(fun_name, ' '.join(map(str, shapes))))
 
+def _dtype_priority(dtype):
+  if issubdtype(dtype, bool_):
+    return 0
+  elif issubdtype(dtype, integer):
+    return 1
+  elif issubdtype(dtype, floating):
+    return 2
+  elif issubdtype(dtype, complexfloating):
+    return 3
+  else:
+    raise TypeError("Dtype {} is not supported by JAX".format(dtype))
+
 def _promote_dtypes(*args):
   """Convenience function to apply Numpy argument dtype promotion."""
   # TODO(dougalm,mattjj): This is a performance bottleneck. Consider memoizing.
   if len(args) < 2:
     return args
-  else:
-    from_dtypes = map(_dtype, args)
-    to_dtype = xla_bridge.canonicalize_dtype(result_type(*from_dtypes))
-    return [lax.convert_element_type(x, to_dtype)
-            if _dtype(x) != to_dtype else x for x in args]
+  dtypes = []
+  scalars = []
+  for x in args:
+    (scalars if ndim(x) == 0 else dtypes).append(_dtype(x))
+  array_priority = _max(map(_dtype_priority, dtypes)) if dtypes else -1
+  dtypes += [x for x in scalars if _dtype_priority(x) > array_priority]
+  to_dtype = xla_bridge.canonicalize_dtype(result_type(*dtypes))
+  return [lax.convert_element_type(x, to_dtype)
+          if _dtype(x) != to_dtype else x for x in args]
 
 def _promote_to_result_dtype(op, *args):
   """Convenience function to promote args directly to the op's result dtype."""
@@ -660,8 +677,7 @@ def arccosh(x):
 def arctanh(x):
   # atanh(x) = 0.5 * log((1 + x) / (1 - x))
   x, = _promote_to_result_dtype(onp.arctanh, x)
-  one = lax._const(x, 1)
-  result = lax._const(x, 0.5) * lax.log((one + x) / (one - x))
+  result = 0.5 * lax.log((1. + x) / (1. - x))
   if issubdtype(_dtype(result), onp.complexfloating):
     return result
   return lax.select(abs(x) <= 1, result, lax.full_like(x, onp.nan))

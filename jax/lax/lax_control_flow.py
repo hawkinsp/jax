@@ -30,6 +30,7 @@ import six
 
 from jax import api
 from jax import core
+from jax import dtypes
 from jax.lax import lax
 from jax import linear_util as lu
 from jax.abstract_arrays import ShapedArray, raise_to_shaped
@@ -305,7 +306,7 @@ def cond(pred, true_operand, true_fun, false_operand, false_fun):
   if len(onp.shape(pred)) != 0:
     raise TypeError("Pred must be a scalar, got {} of shape {}".format(pred, onp.shape(pred)))
 
-  pred_dtype = onp.result_type(pred)
+  pred_dtype = dtypes.dtype(pred)
   if pred_dtype.kind != 'b':
     if pred_dtype.kind in 'iuf':
       pred = pred != 0

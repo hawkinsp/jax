@@ -29,6 +29,7 @@ from six.moves import xrange
 from ..config import flags
 from .. import core
 from .. import ad_util
+from .. import dtypes
 from .. import tree_util
 from .. import linear_util as lu
 from ..abstract_arrays import (ConcreteArray, ShapedArray, AbstractToken,
@@ -103,7 +104,7 @@ def canonicalize_dtype(x):
 canonicalize_dtype_handlers = {}
 canonicalize_dtype_handlers[core.Unit] = identity
 def _canonicalize_ndarray_dtype(x):
-  return onp.asarray(x, xb.canonicalize_dtype(onp.result_type(x)))
+  return onp.asarray(x, xb.canonicalize_dtype(dtypes.dtype(x)))
 for _t in array_types:
   canonicalize_dtype_handlers[_t] = _canonicalize_ndarray_dtype
 

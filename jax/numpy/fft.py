@@ -18,6 +18,7 @@ from __future__ import print_function
 
 import numpy as onp
 
+from .. import dtypes
 from .. import lax
 from ..lib.xla_bridge import xla_client, canonicalize_dtype
 from ..util import get_module_functions

@@ -31,6 +31,7 @@ import numpy.random as npr
 from six.moves import xrange
 
 from . import api
+from . import dtypes
 from .config import flags
 from .util import partial
 from .tree_util import tree_multimap, tree_all, tree_map, tree_reduce
@@ -55,7 +56,7 @@ EPS = 1e-4
 ATOL = 1e-4
 RTOL = 1e-4
 
-_dtype = lambda x: getattr(x, 'dtype', None) or onp.asarray(x).dtype
+_dtype = lambda x: getattr(x, 'dtype', None) or dtypes.dtype(x)
 
 
 def is_sequence(x):
@@ -112,11 +113,13 @@ def scalar_mul(xs, a):
 def rand_like(rng, x):
   shape = onp.shape(x)
   dtype = _dtype(x)
-  randn = lambda: onp.asarray(rng.randn(*shape), dtype=dtype)
-  if onp.issubdtype(dtype, onp.complexfloating):
-    return randn() + dtype.type(1.0j) * randn()
-  else:
-    return randn()
+  is_scalar = dtypes.is_python_scalar(x)
+  def randn():
+    a = onp.asarray(rng.randn(*shape), dtype=dtype)
+    if onp.issubdtype(dtype, onp.complexfloating):
+      a += onp.asarray(rng.randn(*shape) * 1j, dtype=dtype)
+    return a.item() if is_scalar else a
+  return randn()
 
 
 def numerical_jvp(f, primals, tangents, eps=EPS):

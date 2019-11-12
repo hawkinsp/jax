@@ -43,6 +43,7 @@ from six.moves import reduce
 from . import core
 from . import linear_util as lu
 from . import ad_util
+from . import dtypes
 from .core import eval_jaxpr
 from .api_util import (wraps, flatten_fun, apply_flat_fun, flatten_fun_nokwargs,
                        flatten_fun_nokwargs2, apply_flat_fun_nokwargs)
@@ -393,7 +394,7 @@ def value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
     else:
       ans, vjp_py, aux = vjp(f_partial, *dyn_args, has_aux=True)
     _check_scalar(ans)
-    dtype = onp.result_type(ans)
+    dtype = dtypes.dtype(ans)
     if not (holomorphic or onp.issubdtype(dtype, onp.floating)):
       msg = ("Gradient only defined for real-output functions (with dtype that "
              "is a subdtype of np.floating), but got dtype {}. For holomorphic "
@@ -539,7 +540,7 @@ def _std_basis(pytree):
   leaves, _ = tree_flatten(pytree)
   ndim = sum(map(onp.size, leaves))
   # TODO(mattjj): use a symbolic identity matrix here
-  dtype = onp.result_type(*leaves)
+  dtype = dtypes.result_type(*leaves)
   flat_basis = onp.eye(ndim, dtype=dtype)
   return _unravel_array_into_pytree(pytree, 1, flat_basis)
 
@@ -558,7 +559,7 @@ def _split(x, indices, axis):
     return x.split(indices, axis)
 
 def _dtype(x):
-  return canonicalize_dtype(onp.result_type(x))
+  return canonicalize_dtype(dtypes.dtype(x))
 
 
 def vmap(fun, in_axes=0, out_axes=0):
@@ -1799,7 +1800,7 @@ def _elementwise_std_basis(pytree):
   arity = len(leaves)
   dims = map(onp.size, leaves)
   # TODO(mattjj): use symbolic constants
-  dtype = onp.result_type(*leaves)
+  dtype = dtypes.result_type(*leaves)
   if not onp.issubdtype(dtype, onp.floating):
     msg = ("Jacobian only defined for functions with floating input and output "
            "dtypes (i.e. dtypes that model real numbers), got {}.")
@@ -1936,7 +1937,7 @@ def eval_shape(fun, *args, **kwargs):
   dtype('float32')
   """
   def abstractify(x):
-    return ShapedArray(onp.shape(x), onp.result_type(x))
+    return ShapedArray(onp.shape(x), dtypes.dtype(x))
   args_flat, in_tree = tree_flatten((args, kwargs))
   fun, out_tree = flatten_fun(lu.wrap_init(fun), in_tree)
   out = pe.abstract_eval_fun(fun.call_wrapped, *map(abstractify, args_flat))

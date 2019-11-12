@@ -20,6 +20,7 @@ import numpy as onp
 import six
 
 from . import core
+from . import dtypes
 from . import ad_util
 from . util import prod
 from .lib import xla_bridge
@@ -137,7 +138,7 @@ class ConcreteArray(ShapedArray):
     self.val = val
     self.shape = onp.shape(val)
     # canonicalized self.dtype doesn't necessarily match self.val
-    self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(onp.result_type(val)))
+    self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(dtypes.dtype(val)))
     assert self.dtype != onp.dtype('O')
 
   def __eq__(self, other):
@@ -170,11 +171,11 @@ abstract_token = AbstractToken()
 
 
 def make_shaped_array(x):
-  dtype = xla_bridge.canonicalize_dtype(onp.result_type(x))
+  dtype = xla_bridge.canonicalize_dtype(dtypes.dtype(x))
   return ShapedArray(onp.shape(x), dtype)
 
 def zeros_like_array(x):
-  dtype = xla_bridge.canonicalize_dtype(onp.result_type(x))
+  dtype = xla_bridge.canonicalize_dtype(dtypes.dtype(x))
   return onp.broadcast_to(onp.array(0, dtype), onp.shape(x))
 
 array_types = {onp.ndarray, onp.float64, onp.float32, onp.float16,
