@@ -662,7 +662,9 @@ def arcsinh(x):
   log2 = lax._const(a, onp.log(2))
   return lax.select(a < sqrt_max_value, result, lax.sign(x) * (lax.log(a) + log2))
 
-defjvp(arcsinh, lambda g, ans, x: g / lax.sqrt(lax._const(x, 1) + square(x)))
+defjvp(
+  arcsinh,
+  lambda g, ans, x: lax.div(g, lax.sqrt(lax.add(lax._const(x, 1), square(x)))))
 
 
 @_wraps(onp.arccosh)

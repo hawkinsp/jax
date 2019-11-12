@@ -55,7 +55,10 @@ EPS = 1e-4
 ATOL = 1e-4
 RTOL = 1e-4
 
-_dtype = lambda x: getattr(x, 'dtype', None) or onp.asarray(x).dtype
+def _dtype(x):
+  return (getattr(x, 'dtype', None) or
+          onp.dtype(xla_bridge.python_scalar_types.get(type(x), None)) or
+          onp.asarray(x).dtype)
 
 
 def is_sequence(x):
@@ -129,6 +132,7 @@ def numerical_jvp(f, primals, tangents, eps=EPS):
 def check_jvp(f, f_jvp, args, atol=ATOL, rtol=RTOL, eps=EPS):
   rng = onp.random.RandomState(0)
   tangent = tree_map(partial(rand_like, rng), args)
+  print(list(map(repr, args)), list(map(repr, tangent)))
   v_out, t_out = f_jvp(args, tangent)
   v_out_expected = f(*args)
   t_out_expected = numerical_jvp(f, args, tangent, eps=eps)

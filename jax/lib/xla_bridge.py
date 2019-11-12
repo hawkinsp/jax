@@ -26,6 +26,7 @@ from __future__ import print_function
 import os
 import warnings
 from distutils.util import strtobool
+from functools import partial
 
 from absl import logging
 
@@ -351,8 +352,21 @@ def _scalar_constant_handler(c, val, canonicalize_types=True):
 for scalar_type in [onp.int8, onp.int16, onp.int32, onp.int64,
                     onp.uint8, onp.uint16, onp.uint32, onp.uint64,
                     onp.float16, onp.float32, onp.float64, onp.float128,
-                    float, int, bool, onp.bool_, onp.longlong]:
+                    onp.bool_, onp.longlong]:
   register_constant_handler(scalar_type, _scalar_constant_handler)
 
+
+python_scalar_types = {
+  bool: onp.bool_,
+  int: onp.int32,
+  float: onp.float32,
+  complex: onp.complex64,
+}
 if six.PY2:
-  register_constant_handler(long, _scalar_constant_handler) # noqa: F821
+  python_scalar_types[long] = onp.int32  # noqa: F821
+
+def _python_scalar_handler(dtype, c, val, canonicalize_dtypes=True):
+  return c.NumpyArrayConstant(dtype(val))
+
+for ptype, dtype in python_scalar_types.items():
+  register_constant_handler(ptype, partial(_python_scalar_handler, dtype))

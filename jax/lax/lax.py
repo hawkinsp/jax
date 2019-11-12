@@ -68,7 +68,7 @@ def _is_python_scalar(x):
   try:
     return isinstance(x.aval, AbstractPythonScalar)
   except AttributeError:
-    return isinstance(x, _python_scalar_types)
+    return type(x) in _python_scalar_types
 
 def _scalar_type_category(x):
   try:
@@ -1485,7 +1485,8 @@ ad_util.jaxval_zeros_likers[xla.DeviceArray] = zeros_like_array
 ### primitives
 
 
-_input_dtype = lambda *args, **_: xla_bridge.canonicalize_dtype(args[0].dtype)
+def _input_dtype(*args, **_):
+  return xla_bridge.canonicalize_dtype(args[0].dtype)
 _fixed_dtype = lambda dtype: lambda *args, **kwargs: xla_bridge.canonicalize_dtype(dtype)
 _complex_basetype = lambda dtype: onp.abs(onp.zeros((), dtype)).dtype
 
@@ -4390,7 +4391,10 @@ def _dynamic_slice_indices(operand, start_indices):
 
 
 def _const(example, val):
-  return onp.array(val, _dtype(example))
+  if _is_python_scalar(example):
+    return _scalar_type_category(example).scalar_type(val)
+  else:
+    return onp.array(val, _dtype(example))
 
 _zeros = partial(full_like, fill_value=0)
 _zero = partial(full_like, shape=(), fill_value=0)

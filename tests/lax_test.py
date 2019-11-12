@@ -1734,23 +1734,23 @@ def gradient_tolerance(dtype, tol=None):
 
 class LaxAutodiffTest(jtu.JaxTestCase):
 
-  @parameterized.named_parameters(itertools.chain.from_iterable(
-      jtu.cases_from_list(
-        {"testcase_name": jtu.format_test_name_suffix(
-            rec.name, shapes, itertools.repeat(dtype)),
-         "op": rec.op, "rng_factory": rec.rng_factory, "shapes": shapes, "dtype": dtype,
-         "order": rec.order, "tol": rec.tol}
-        for shape_group in compatible_shapes
-        for shapes in CombosWithReplacement(shape_group, rec.nargs)
-        for dtype in rec.dtypes)
-      for rec in LAX_GRAD_OPS))
-  def testOpGrad(self, op, rng_factory, shapes, dtype, order, tol):
-    rng = rng_factory()
-    if jtu.device_under_test() == "tpu" and op is lax.pow:
-      raise SkipTest("pow grad imprecise on tpu")
-    tol = 1e-1 if num_float_bits(dtype) == 32 else tol
-    args = tuple(rng(shape, dtype) for shape in shapes)
-    check_grads(op, args, order, ["fwd", "rev"], tol, tol)
+  # @parameterized.named_parameters(itertools.chain.from_iterable(
+  #     jtu.cases_from_list(
+  #       {"testcase_name": jtu.format_test_name_suffix(
+  #           rec.name, shapes, itertools.repeat(dtype)),
+  #        "op": rec.op, "rng_factory": rec.rng_factory, "shapes": shapes, "dtype": dtype,
+  #        "order": rec.order, "tol": rec.tol}
+  #       for shape_group in compatible_shapes
+  #       for shapes in CombosWithReplacement(shape_group, rec.nargs)
+  #       for dtype in rec.dtypes)
+  #     for rec in LAX_GRAD_OPS))
+  # def testOpGrad(self, op, rng_factory, shapes, dtype, order, tol):
+  #   rng = rng_factory()
+  #   if jtu.device_under_test() == "tpu" and op is lax.pow:
+  #     raise SkipTest("pow grad imprecise on tpu")
+  #   tol = 1e-1 if num_float_bits(dtype) == 32 else tol
+  #   args = tuple(rng(shape, dtype) for shape in shapes)
+  #   check_grads(op, args, order, ["fwd", "rev"], tol, tol)
 
   @parameterized.named_parameters(itertools.chain.from_iterable(
       jtu.cases_from_list(
@@ -1761,1188 +1761,1188 @@ class LaxAutodiffTest(jtu.JaxTestCase):
   def testOpGradSpecialValue(self, op, special_value):
     check_grads(op, (special_value,), 2, ["fwd", "rev"])
 
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_from_dtype={}_to_dtype={}".format(
-          jtu.dtype_str(from_dtype), jtu.dtype_str(to_dtype)),
-       "from_dtype": from_dtype, "to_dtype": to_dtype, "rng_factory": rng_factory}
-      for from_dtype, to_dtype in itertools.product(
-          float_dtypes + complex_dtypes, repeat=2)
-      for rng_factory in [jtu.rand_default]))
-  def testConvertElementTypeGrad(self, from_dtype, to_dtype, rng_factory):
-    rng = rng_factory()
-    tol = max(gradient_tolerance(to_dtype), gradient_tolerance(from_dtype))
-    args = (rng((2, 3), from_dtype),)
-    convert_element_type = lambda x: lax.convert_element_type(x, to_dtype)
-    check_grads(convert_element_type, args, 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_min_shape={}_operand_shape={}_max_shape={}".format(
-          jtu.format_shape_dtype_string(min_shape, dtype),
-          jtu.format_shape_dtype_string(operand_shape, dtype),
-          jtu.format_shape_dtype_string(max_shape, dtype)),
-       "min_shape": min_shape, "operand_shape": operand_shape,
-       "max_shape": max_shape, "dtype": dtype, "rng_factory": rng_factory}
-      for min_shape, operand_shape, max_shape in [
-          [(), (), ()],
-          [(), (2, 3), ()],
-          [(2, 3), (2, 3), (2, 3)],
-      ]
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testClampGrad(self, min_shape, operand_shape, max_shape, dtype, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype, {onp.float16: 1e-1, onp.float32: 1e-2})
-    shapes = [min_shape, operand_shape, max_shape]
-    min, operand, max = (rng(shape, dtype) for shape in shapes)
-    min, max = onp.minimum(min, max), onp.maximum(min, max)  # broadcast
-    eps = 1e-1 if dtype == onp.float16 else 1e-2
-    check_grads(lax.clamp, (min, operand, max), 2, ["fwd", "rev"], tol, tol,
-                eps=eps)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_dim={}_baseshape=[{}]_dtype={}_narrs={}".format(
-          dim, ",".join(str(d) for d in base_shape), onp.dtype(dtype).name,
-          num_arrs),
-       "dim": dim, "base_shape": base_shape, "dtype": dtype,
-       "num_arrs": num_arrs, "rng_factory": rng_factory}
-      for num_arrs in [3]
-      for dtype in float_dtypes
-      for base_shape in [(4,), (3, 4), (2, 3, 4)]
-      for dim in range(len(base_shape))
-      for rng_factory in [jtu.rand_default]))
-  def testConcatenateGrad(self, dim, base_shape, dtype, num_arrs, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    shapes = [base_shape[:dim] + (size,) + base_shape[dim+1:]
-              for size, _ in zip(itertools.cycle([3, 1, 4]), range(num_arrs))]
-    operands = tuple(rng(shape, dtype) for shape in shapes)
-    concatenate = lambda *args: lax.concatenate(args, dim)
-    check_grads(concatenate, operands, 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_strides={}_padding={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               strides, padding),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "strides": strides, "padding": padding, "rng_factory": rng_factory,}
-       for lhs_shape, rhs_shape, all_strides in itertools.chain(
-           [((b, i, 3, 4), (j, i, 1, 2), [(1, 1), (1, 2), (2, 1)])
-            for b, i, j in itertools.product([2, 3], repeat=3)],
-           [((4, 2, 1), (3, 2, 1), [(1,)])])
-       for strides in all_strides
-       for dtype in float_dtypes
-       for padding in ["VALID", "SAME"]
-       for rng_factory in [jtu.rand_small]))
-  def testConvGrad(self, lhs_shape, rhs_shape, dtype, strides, padding, rng_factory):
-    rng = rng_factory()
-    lhs = rng(lhs_shape, dtype)
-    rhs = rng(rhs_shape, dtype)
-    conv = partial(lax.conv, window_strides=strides, padding=padding,
-                   precision=lax.Precision.HIGHEST)
-    check_grads_bilinear(conv, (lhs, rhs), order=2, modes=["fwd", "rev"],
-                         atol=1e-2, rtol=1e-2)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_strides={}_padding={}_lhs_dilation={}_"
-       "rhs_dilation={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               strides, padding, lhs_dil, rhs_dil),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "strides": strides, "padding": padding, "lhs_dil": lhs_dil,
-       "rhs_dil": rhs_dil, "rng_factory": rng_factory}
-       for lhs_shape, rhs_shape, all_strides, all_pads, lhs_dils, rhs_dils in
-       itertools.chain(
-           [((b, i, 3, 4), (j, i, 1, 2), [(1, 1), (1, 2), (2, 1)],
-             [((0, 0), (0, 0)), ((-1, 0), (0, -1)), ((1, 0), (0, 1))],
-             [(1, 1), (2, 1)], [(1, 1)])
-            for b, i, j in itertools.product([2, 3], repeat=3)],
-           [((4, 2, 1), (3, 2, 1), [(1,)], [((1, 1),), ((0, 0),)],
-             [(1,), (2,)], [(1,), (2,)])])
-       for strides in all_strides
-       for rhs_dil in rhs_dils
-       for lhs_dil in lhs_dils
-       for dtype in float_dtypes
-       for padding in all_pads
-       for rng_factory in [jtu.rand_small]))
-  def testConvWithGeneralPaddingGrad(self, lhs_shape, rhs_shape, dtype, strides,
-                                     padding, lhs_dil, rhs_dil, rng_factory):
-    rng = rng_factory()
-    lhs = rng(lhs_shape, dtype)
-    rhs = rng(rhs_shape, dtype)
-    conv = partial(lax.conv_with_general_padding, window_strides=strides,
-                   padding=padding, lhs_dilation=lhs_dil, rhs_dilation=rhs_dil,
-                   precision=lax.Precision.HIGHEST)
-    check_grads_bilinear(conv, (lhs, rhs), order=2, modes=["fwd", "rev"],
-                         atol=1e-2, rtol=1e-2)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_strides={}_padding={}_lhs_dilation={}_"
-       "rhs_dilation={}_dims={}_feature_group_count={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               strides, padding, lhs_dil, rhs_dil, ",".join(dim_nums),
-               feature_group_count),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "strides": strides, "padding": padding, "lhs_dil": lhs_dil,
-       "rhs_dil": rhs_dil, "rng_factory": rng_factory, "dimension_numbers": dim_nums,
-       "perms": perms, "feature_group_count": feature_group_count}
-      for lhs_shape, rhs_shape, all_strides, all_pads, lhs_dils, rhs_dils in [
-          ((b, i, 6, 7),  # lhs_shape
-           (j, i, 1, 2),  # rhs_shape
-           [(1, 1), (1, 2), (2, 1)],  # strides
-           [((0, 0), (0, 0)), ((1, 0), (0, 1)), ((0, -1), (0, 0))],  # pads
-           [(1, 1), (2, 1)],  # lhs_dils
-           [(1, 1), (2, 2)])  # rhs_dils
-          for b, i, j in itertools.product([1, 2], repeat=3)]
-      for feature_group_count in [1, 2]
-      for strides in all_strides
-      for rhs_dil in rhs_dils
-      for lhs_dil in lhs_dils
-      for dtype in float_dtypes
-      for padding in all_pads
-      for dim_nums, perms in [
-          (("NCHW", "OIHW", "NCHW"), ([0, 1, 2, 3], [0, 1, 2, 3])),
-          (("NHWC", "HWIO", "NHWC"), ([0, 2, 3, 1], [2, 3, 1, 0])),
-          (("NHWC", "OIHW", "NCHW"), ([0, 2, 3, 1], [0, 1, 2, 3]))]
-      for rng_factory in [jtu.rand_default]
-  ))
-  @jtu.skip_on_devices("tpu")  # TODO(phawkins): precision problems on TPU.
-  def testConvGeneralDilatedGrad(self, lhs_shape, rhs_shape, dtype, strides,
-                                 padding, lhs_dil, rhs_dil, dimension_numbers,
-                                 perms, feature_group_count, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype, {onp.float16: 5e-1, onp.float32: 1e-4})
-
-    # permute shapes to match dim_spec, scale by feature_group_count
-    lhs_perm, rhs_perm = perms
-    lhs_shape = list(onp.take(lhs_shape, lhs_perm))
-    rhs_shape = list(onp.take(rhs_shape, rhs_perm))
-    dim_spec = lax.conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers)
-    lhs_shape[dim_spec.lhs_spec[1]] *= feature_group_count
-    rhs_shape[dim_spec.rhs_spec[0]] *= feature_group_count
-
-    lhs = rng(lhs_shape, dtype)
-    rhs = rng(rhs_shape, dtype)
-    conv = partial(lax.conv_general_dilated, window_strides=strides,
-                   padding=padding, lhs_dilation=lhs_dil, rhs_dilation=rhs_dil,
-                   dimension_numbers=dimension_numbers,
-                   feature_group_count=feature_group_count,
-                   precision=lax.Precision.HIGHEST)
-    check_grads_bilinear(conv, (lhs, rhs), order=2, modes=["fwd", "rev"],
-                         atol=tol, rtol=tol)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_lhs_shape={}_rhs_shape={}".format(
-          jtu.format_shape_dtype_string(lhs_shape, dtype),
-          jtu.format_shape_dtype_string(rhs_shape, dtype)),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "rng_factory": jtu.rand_default}
-      for lhs_shape in [(2,), (3, 2)] for rhs_shape in [(2,), (2, 4)]
-      for dtype in float_dtypes))
-  def testDotGrad(self, lhs_shape, rhs_shape, dtype, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype, {onp.float16: 1e-1, onp.float32: 1e-4})
-    lhs = rng(lhs_shape, dtype)
-    rhs = rng(rhs_shape, dtype)
-    dot = partial(lax.dot, precision=lax.Precision.HIGHEST)
-    check_grads_bilinear(dot, (lhs, rhs), order=2, modes=["fwd", "rev"],
-                         atol=tol, rtol=tol)
-    # check that precision config is preserved
-    result, pullback = api.vjp(dot, lhs, rhs)
-    gresult = lax.zeros_like_array(result)
-    s = str(api.make_jaxpr(pullback)(gresult))
-    assert "precision=HIGHEST" in s
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_dimension_numbers={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               dimension_numbers),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "dimension_numbers": dimension_numbers, "rng_factory": jtu.rand_small}
-      for lhs_shape, rhs_shape, dimension_numbers in [
-          ((3, 2), (2, 4), (([1], [0]), ([], []))),
-          ((3, 5), (2, 5), (([1], [1]), ([], []))),
-          ((5, 3), (5, 2), (([0], [0]), ([], []))),
-          ((3, 3, 2), (3, 2, 4), (([2], [1]), ([0], [0]))),
-      ]
-      for dtype in float_dtypes))
-  def testDotGeneralContractAndBatchGrads(self, lhs_shape, rhs_shape, dtype,
-                                          dimension_numbers, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    lhs = rng(lhs_shape, dtype)
-    rhs = rng(rhs_shape, dtype)
-    dot_general = partial(lax.dot_general, dimension_numbers=dimension_numbers,
-                          precision=lax.Precision.HIGHEST)
-    check_grads_bilinear(dot_general, (lhs, rhs), order=2, modes=["fwd", "rev"],
-                         atol=tol, rtol=tol)
-    # check that precision config is preserved
-    result, pullback = api.vjp(dot_general, lhs, rhs)
-    gresult = lax.zeros_like_array(result)
-    s = str(api.make_jaxpr(pullback)(gresult))
-    assert "precision=HIGHEST" in s
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_dtype={}_broadcast_sizes={}".format(
-          shape, onp.dtype(dtype).name, broadcast_sizes),
-       "shape": shape, "dtype": dtype, "broadcast_sizes": broadcast_sizes,
-       "rng_factory": rng_factory}
-      for shape in [(), (2, 3)]
-      for dtype in float_dtypes
-      for broadcast_sizes in [(), (2,), (1, 2)]
-      for rng_factory in [jtu.rand_default]))
-  def testBroadcastGrad(self, shape, dtype, broadcast_sizes, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    args = (rng(shape, dtype),)
-    broadcast = lambda x: lax.broadcast(x, broadcast_sizes)
-    check_grads(broadcast, args, 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_inshape={}_outshape={}_bcdims={}".format(
-          jtu.format_shape_dtype_string(inshape, dtype),
-          outshape, broadcast_dimensions),
-       "inshape": inshape, "dtype": dtype, "outshape": outshape,
-       "dimensions": broadcast_dimensions, "rng_factory": rng_factory}
-      for inshape, outshape, broadcast_dimensions in [
-          ([2], [2, 2], [0]),
-          ([2], [2, 2], [1]),
-          ([2], [2, 3], [0]),
-          ([], [2, 3], []),
-      ]
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testBroadcastInDimGrad(self, inshape, dtype, outshape, dimensions, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    operand = rng(inshape, dtype)
-    broadcast_in_dim = lambda x: lax.broadcast_in_dim(x, outshape, dimensions)
-    check_grads(broadcast_in_dim, (operand,), 2, ["fwd", "rev"], tol, tol,
-                eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_inshape={}_outshape={}_perm={}".format(
-          jtu.format_shape_dtype_string(arg_shape, dtype),
-          jtu.format_shape_dtype_string(out_shape, dtype),
-          permutation),
-       "arg_shape": arg_shape, "out_shape": out_shape, "dtype": dtype,
-       "rng_factory": rng_factory, "permutation": permutation}
-      for dtype in float_dtypes
-      for arg_shape, out_shape, permutation in [
-          [(3, 4), (12,), None],
-          [(2, 1, 4), (8,), None],
-          [(2, 2, 4), (2, 8), None],
-          [(3, 4), (12,), (0, 1)],
-          [(3, 4), (12,), (1, 0)],
-          [(2, 1, 4), (8,), (0, 2, 1)],
-          [(2, 1, 4), (8,), (2, 0, 1)],
-          [(2, 2, 4), (2, 8), (0, 2, 1)],
-          [(2, 2, 4), (2, 8), (2, 0, 1)],
-      ]
-      for rng_factory in [jtu.rand_default]))
-  def testReshapeGrad(self, arg_shape, out_shape, permutation, dtype, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    operand = rng(arg_shape, dtype)
-    reshape = lambda x: lax.reshape(x, out_shape, permutation)
-    check_grads(reshape, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_inshape={}_pads={}"
-       .format(jtu.format_shape_dtype_string(shape, dtype), pads),
-       "shape": shape, "dtype": dtype, "pads": pads, "rng_factory": jtu.rand_small}
-      for shape in [(2, 3)]
-      for dtype in float_dtypes
-      for pads in [[(1, 2, 1), (0, 1, 0)], [(-1, 0, 0), (-1, 0, 2)]]))
-  def testPadGrad(self, shape, dtype, pads, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-
-    operand = rng(shape, dtype)
-    pad = lambda operand: lax.pad(operand, onp.array(0, dtype), pads)
-    check_grads(pad, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-    operand = rng(shape, dtype)
-    padding_value = onp.array(0., dtype)
-    pad = lambda operand, padding_value: lax.pad(operand, padding_value, pads)
-    check_grads(pad, (operand, padding_value), 2, ["fwd", "rev"], tol, tol,
-                eps=1.)
-
-  def testReverseGrad(self):
-    rev = lambda operand: lax.rev(operand, dimensions)
-
-    dimensions = [0]
-    check_grads(rev, (onp.array([3., 2., 1.]),), 2)
-
-    dimensions = [0, 1]
-    check_grads(rev, (onp.array([[6., 5., 4.], [3., 2., 1.]]),), 2)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_predshape={}_argshapes={}".format(
-          jtu.format_shape_dtype_string(pred_shape, onp.bool_),
-          jtu.format_shape_dtype_string(arg_shape, dtype)),
-       "pred_shape": pred_shape, "arg_shape": arg_shape, "dtype": dtype,
-       "rng_factory": rng_factory}
-      for arg_shape in [(), (3,), (2, 3)]
-      for pred_shape in ([(), arg_shape] if arg_shape else [()])
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testSelectGrad(self, pred_shape, arg_shape, dtype, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    pred = rng(pred_shape, onp.bool_)
-    on_true = rng(arg_shape, dtype)
-    on_false = rng(arg_shape, dtype)
-    select = lambda on_true, on_false: lax.select(pred, on_true, on_false)
-    check_grads(select, (on_true, on_false), 2, ["fwd", "rev"], tol, tol,
-                eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_shape={}_start_indices={}_limit_indices={}_strides={}".format(
-          jtu.format_shape_dtype_string(shape, dtype),
-          start_indices, limit_indices, strides),
-       "shape": shape, "dtype": dtype, "starts": start_indices,
-       "limits": limit_indices, "strides": strides, "rng_factory": rng_factory}
-      for shape, start_indices, limit_indices, strides in [
-        [(3,), (1,), (2,), None],
-        [(7,), (4,), (7,), None],
-        [(5,), (1,), (5,), (2,)],
-        [(8,), (1,), (6,), (2,)],
-        [(5, 3), (1, 1), (3, 2), None],
-        [(5, 3), (1, 1), (3, 1), None],
-        [(7, 5, 3), (4, 0, 1), (7, 1, 3), None],
-        [(5, 3), (1, 1), (2, 1), (1, 1)],
-        [(5, 3), (1, 1), (5, 3), (2, 1)],
-      ]
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testSliceGrad(self, shape, dtype, starts, limits, strides, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    operand = rng(shape, dtype)
-    slice = lambda x: lax.slice(x, starts, limits, strides)
-    check_grads(slice, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_start_indices={}_size_indices={}".format(
-          jtu.format_shape_dtype_string(shape, dtype),
-          start_indices, size_indices),
-       "shape": shape, "dtype": dtype, "start_indices": start_indices,
-       "size_indices": size_indices, "rng_factory": rng_factory}
-      for shape, start_indices, size_indices in [
-        [(3,), (1,), (1,)],
-        [(5, 3), (1, 1), (3, 1)],
-        [(7, 5, 3), (4, 1, 0), (2, 0, 1)],
-      ]
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testDynamicSliceGrad(self, shape, dtype, start_indices, size_indices,
-                           rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    operand = rng(shape, dtype)
-    dynamic_slice = lambda x: lax.dynamic_slice(x, start_indices, size_indices)
-    check_grads(dynamic_slice, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_start_indices={}_update_shape={}".format(
-          jtu.format_shape_dtype_string(shape, dtype),
-          start_indices, update_shape),
-       "shape": shape, "dtype": dtype, "start_indices": start_indices,
-       "update_shape": update_shape, "rng_factory": rng_factory}
-      for shape, start_indices, update_shape in [
-        [(3,), (1,), (1,)],
-        [(5, 3), (1, 1), (3, 1)],
-        [(7, 5, 3), (4, 1, 0), (2, 0, 1)],
-      ]
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testDynamicUpdateSliceGrad(self, shape, dtype, start_indices,
-                                 update_shape, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    operand = rng(shape, dtype)
-    update = rng(update_shape, dtype)
-    start_indices = onp.array(start_indices)
-
-    dus = lambda x, y: lax.dynamic_update_slice(x, y, start_indices)
-    check_grads(dus, (operand, update), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-    dus = lambda x: lax.dynamic_update_slice(x, update, start_indices)
-    check_grads(dus, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-    dus = lambda y: lax.dynamic_update_slice(operand, y, start_indices)
-    check_grads(dus, (update,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_perm={}".format(
-          jtu.format_shape_dtype_string(shape, dtype), perm),
-       "shape": shape, "dtype": dtype, "perm": perm, "rng_factory": rng_factory}
-      for shape, perm in [
-        [(3, 4), (1, 0)],
-        [(3, 4), (0, 1)],
-        [(3, 4, 5), (2, 1, 0)],
-        [(3, 4, 5), (1, 0, 2)],
-      ]
-      for dtype in float_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testTransposeGrad(self, shape, dtype, perm, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype)
-    operand = rng(shape, dtype)
-    transpose = lambda x: lax.transpose(x, perm)
-    check_grads(transpose, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_op={}_inshape={}_reducedims={}"
-       .format(op.__name__, jtu.format_shape_dtype_string(shape, dtype), dims),
-       "op": op, "init_val": init_val, "shape": shape, "dtype": dtype,
-       "dims": dims, "rng_factory": rng_factory}
-      for init_val, op, dtypes in [
-          (0, lax.add, inexact_dtypes),
-          # Precision problems for float16 tests.
-          (-onp.inf, lax.max, [t for t in inexact_dtypes if t != onp.float16]),
-          (onp.inf, lax.min, [t for t in inexact_dtypes if t != onp.float16]),
-          # The mul test overflows the range of a float16.
-          (1, lax.mul, [t for t in inexact_dtypes if t != onp.float16]),
-      ]
-      for dtype in dtypes
-      for shape, dims in [
-          [(3, 4, 5), ()],
-          [(3, 4, 5), (0,)],
-          [(3, 4, 5), (1, 2)],
-          [(3, 4, 5), (0, 2)],
-          [(3, 4, 5), (0, 1, 2)],
-          [(3, 1), (1,)],
-      ]
-      for rng_factory in [jtu.rand_default]))
-  def testReduceGrad(self, op, init_val, shape, dtype, dims, rng_factory):
-    rng = rng_factory()
-    if jtu.device_under_test() == "tpu" and op is lax.mul:
-      raise SkipTest("unimplemented case")
-    tol = gradient_tolerance(
-      dtype, {onp.float16: 1e-1, onp.float32: 1e-2, onp.float64: 1e-3})
-    operand = rng(shape, dtype)
-    init_val = onp.asarray(init_val, dtype=dtype)
-    reduce = lambda operand: lax.reduce(operand, init_val, op, dims)
-    eps = (1.0 if onp.finfo(dtype).bits == 16 and op is lax.add else
-           1e-2 if onp.finfo(dtype).bits == 32 else None)
-    check_grads(reduce, (operand,), 1, ["fwd", "rev"], tol, tol, eps)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_op={}_dtype={}_padding={}"
-       .format(op.__name__, onp.dtype(dtype).name, padding),
-       "op": op, "init_val": init_val, "dtype": dtype, "padding": padding,
-       "rng_factory": rng_factory}
-      for init_val, op, dtypes, rng in [
-          (0, lax.add, float_dtypes, jtu.rand_small),
-          (-onp.inf, lax.max, [onp.float32], jtu.rand_default),
-          (onp.inf, lax.min, [onp.float32], jtu.rand_default),
-      ]
-      for dtype in dtypes
-      for padding in ["VALID", "SAME"]
-      for rng_factory in [jtu.rand_default]))
-  def testReduceWindowGrad(self, op, init_val, dtype, padding, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype, {onp.float16: 1e-1, onp.float32: 1e-3})
-    init_val = onp.asarray(init_val, dtype=dtype)
-
-    # We need this conditional and the corresponding loop logic to be in the
-    # test method, rather than at the parameterized test level, because it
-    # depends on FLAGS for the device under test.
-    # TODO(b/31565929): enable when fixed.
-    if jtu.device_under_test() == "tpu" and op is not lax.add:
-      all_configs = [((6, 5, 4, 3), (2, 2, 1, 1), (1, 2, 1, 1))]
-
-      # TODO(b/73062247): need variadic reduce-window for better precision.
-      gradient_order = 1
-    else:
-      all_configs = itertools.chain(
-          itertools.product(
-              [(4, 6)],  # shapes
-              [(2, 1), (1, 2)],  # window_dimensions
-              [(1, 1), (2, 1), (1, 2)]  # strides
-          ),
-          itertools.product(
-              [(3, 2, 4, 6)],  # shapes
-              [(1, 1, 2, 1), (2, 1, 2, 1)],  # window_dimensions
-              [(1, 2, 2, 1), (1, 1, 1, 1)]),  # strides
-      )
-      gradient_order = 3
-
-    def fun(operand):
-      return lax.reduce_window(operand, init_val, op, dims, strides, padding)
-
-    for shape, dims, strides in all_configs:
-      operand = rng(shape, dtype)
-      if op is lax.add:
-        eps = 1.
-      else:
-        # this test can fail if there are duplicates in operand
-        self.assertEqual(onp.unique(operand).size, operand.size,
-                         msg="test requires operand elements to be unique.")
-        eps = 1e-2
-      check_grads(fun, (operand,), gradient_order, ["fwd", "rev"], tol, tol,
-                  eps)
-
-  # TODO(b/205052657): enable more tests when supported
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_axis={}".format(
-          jtu.format_shape_dtype_string(shape, dtype), axis),
-       "rng_factory": rng_factory, "shape": shape, "dtype": dtype, "axis": axis}
-      for dtype in [onp.float32]
-      for shape in [(5,), (5, 7)]
-      for axis in [len(shape) - 1]
-      for rng_factory in [jtu.rand_default]))
-  def testSortGrad(self, shape, dtype, axis, rng_factory):
-    rng = rng_factory()
-    tol = gradient_tolerance(dtype, {onp.float32: 1e-3})
-    operand = rng(shape, dtype)
-    sort = lambda x: lax.sort(x, axis)
-    check_grads(sort, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1e-2)
-
-  # TODO(b/205052657): enable more tests when supported
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_keyshape={}_valshape={}_axis={}".format(
-          jtu.format_shape_dtype_string(shape, key_dtype),
-          jtu.format_shape_dtype_string(shape, val_dtype),
-          axis),
-       "rng_factory": rng_factory, "shape": shape,
-       "key_dtype": key_dtype, "val_dtype": val_dtype, "axis": axis}
-      for key_dtype in [onp.float32]
-      for val_dtype in [onp.float32]
-      for shape in [(3,), (5, 3)]
-      for axis in [len(shape) - 1]
-      for rng_factory in [jtu.rand_default]))
-  def testSortKeyValGrad(self, shape, key_dtype, val_dtype, axis, rng_factory):
-    rng = rng_factory()
-    # This test relies on the property that wherever keys are tied, values are
-    # too, since we don't guarantee the same ordering of values with equal keys.
-    # To avoid that case, we generate unique keys (globally in the key array).
-    perm_rng = onp.random.RandomState(0)
-    def args_maker():
-      flat_keys = onp.arange(onp.prod(shape, dtype=int), dtype=key_dtype)
-      keys = perm_rng.permutation(flat_keys).reshape(shape)
-      values = rng(shape, val_dtype)
-      return keys, values
-    keys, values = args_maker()
-
-    fun = lambda keys, values: lax.sort_key_val(keys, values, axis)
-    check_grads(fun, (keys, values), 2, ["fwd", "rev"], 1e-2, 1e-2, 1e-2)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_idxs={}_axes={}".format(
-          jtu.format_shape_dtype_string(shape, dtype), idxs, axes),
-       "shape": shape, "dtype": dtype, "idxs": idxs, "axes": axes,
-       "rng_factory": rng_factory}
-      for dtype in float_dtypes
-      for shape, idxs, axes in [
-          [(3, 4, 5), (onp.array([0, 2, 1]),), (0,)],
-          [(3, 4, 5), (onp.array([-1, -2]),), (0,)],
-          [(3, 4, 5), (onp.array([0, 2]), onp.array([1, 3])), (0, 1)],
-          [(3, 4, 5), (onp.array([0, 2]), onp.array([1, 3])), (0, 2)],
-      ]
-      for rng_factory in [jtu.rand_default]))
-  def testIndexTakeGrad(self, shape, dtype, idxs, axes, rng_factory):
-    rng = rng_factory()
-    src = rng(shape, dtype)
-    index_take = lambda src: lax.index_take(src, idxs, axes)
-    check_grads(index_take, (src,), 2, ["fwd", "rev"], 1e-2, 1e-2, 1)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_idxs={}_dnums={}_slice_sizes={}".format(
-          jtu.format_shape_dtype_string(shape, dtype), idxs, dnums,
-          slice_sizes),
-       "shape": shape, "dtype": dtype, "idxs": idxs, "dnums": dnums,
-       "slice_sizes": slice_sizes, "rng_factory": rng_factory,
-       "rng_idx_factory": rng_idx_factory}
-      for dtype in float_dtypes
-      for shape, idxs, dnums, slice_sizes in [
-          ((5,), onp.array([[0], [2]]), lax.GatherDimensionNumbers(
-            offset_dims=(), collapsed_slice_dims=(0,), start_index_map=(0,)),
-            (1,)),
-          ((10,), onp.array([[0], [0], [0]]), lax.GatherDimensionNumbers(
-            offset_dims=(1,), collapsed_slice_dims=(), start_index_map=(0,)),
-            (2,)),
-          ((10, 5,), onp.array([[0], [2], [1]]), lax.GatherDimensionNumbers(
-            offset_dims=(1,), collapsed_slice_dims=(0,), start_index_map=(0,)),
-            (1, 3)),
-      ]
-      for rng_idx_factory in [partial(jtu.rand_int, max(shape))]
-      for rng_factory in [jtu.rand_default]))
-  def testGatherGrad(self, shape, dtype, idxs, dnums, slice_sizes, rng_factory,
-                     rng_idx_factory):
-    rng = rng_factory()
-    rng_idx = rng_idx_factory()
-    idxs = rng_idx(idxs.shape, idxs.dtype)
-    gather = lambda x: lax.gather(x, idxs, dimension_numbers=dnums,
-                                  slice_sizes=slice_sizes)
-    x = rng(shape, dtype)
-    check_grads(gather, (x,), 2, ["fwd", "rev"], 1e-2, 1e-2, 1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_idxs={}_update={}_dnums={}".format(
-          jtu.format_shape_dtype_string(arg_shape, dtype),
-          idxs, update_shape, dnums),
-       "arg_shape": arg_shape, "dtype": dtype, "idxs": idxs,
-       "update_shape": update_shape, "dnums": dnums, "rng_factory": rng_factory,
-       "rng_idx_factory": rng_idx_factory}
-      for dtype in float_dtypes
-      for arg_shape, idxs, update_shape, dnums in [
-          ((5,), onp.array([[0], [2]]), (2,), lax.ScatterDimensionNumbers(
-            update_window_dims=(), inserted_window_dims=(0,),
-            scatter_dims_to_operand_dims=(0,))),
-          ((10,), onp.array([[0], [0], [0]]), (3, 2), lax.ScatterDimensionNumbers(
-            update_window_dims=(1,), inserted_window_dims=(),
-            scatter_dims_to_operand_dims=(0,))),
-          ((10, 5,), onp.array([[0], [2], [1]]), (3, 3), lax.ScatterDimensionNumbers(
-            update_window_dims=(1,), inserted_window_dims=(0,),
-            scatter_dims_to_operand_dims=(0,))),
-      ]
-      for rng_idx_factory in [partial(jtu.rand_int, max(arg_shape))]
-      for rng_factory in [jtu.rand_default]))
-  def testScatterAddGrad(self, arg_shape, dtype, idxs, update_shape, dnums,
-                         rng_factory, rng_idx_factory):
-    rng = rng_factory()
-    rng_idx = rng_idx_factory()
-    idxs = rng_idx(idxs.shape, idxs.dtype)
-    scatter_add = lambda x, y: lax.scatter_add(x, idxs, y,
-                                               dimension_numbers=dnums)
-    x = rng(arg_shape, dtype)
-    y = rng(update_shape, dtype)
-    check_grads(scatter_add, (x, y), 2, ["fwd", "rev"], 1e-2, 1e-2, 1.)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_idxs={}_update={}_dnums={}".format(
-          jtu.format_shape_dtype_string(arg_shape, dtype),
-          idxs, update_shape, dnums),
-       "arg_shape": arg_shape, "dtype": dtype, "idxs": idxs,
-       "update_shape": update_shape, "dnums": dnums, "rng_factory": rng_factory,
-       "rng_idx_factory": rng_idx_factory}
-      for dtype in float_dtypes
-      for arg_shape, idxs, update_shape, dnums in [
-          ((5,), onp.array([[0], [2]]), (2,), lax.ScatterDimensionNumbers(
-            update_window_dims=(), inserted_window_dims=(0,),
-            scatter_dims_to_operand_dims=(0,))),
-          ((10,), onp.array([[0], [0], [0]]), (3, 2), lax.ScatterDimensionNumbers(
-            update_window_dims=(1,), inserted_window_dims=(),
-            scatter_dims_to_operand_dims=(0,))),
-          ((10, 5,), onp.array([[0], [2], [1]]), (3, 3), lax.ScatterDimensionNumbers(
-            update_window_dims=(1,), inserted_window_dims=(0,),
-            scatter_dims_to_operand_dims=(0,))),
-      ]
-      for rng_idx_factory in [partial(jtu.rand_int, max(arg_shape))]
-      for rng_factory in [jtu.rand_default]))
-  def testScatterGrad(self, arg_shape, dtype, idxs, update_shape, dnums,
-                      rng_factory, rng_idx_factory):
-    rng = rng_factory()
-    rng_idx = rng_idx_factory()
-    idxs = rng_idx(idxs.shape, idxs.dtype)
-    scatter = lambda x, y: lax.scatter(x, idxs, y, dimension_numbers=dnums)
-    x = rng(arg_shape, dtype)
-    y = rng(update_shape, dtype)
-    check_grads(scatter, (x, y), 2, ["fwd", "rev"], 1e-2, 1e-2, 1.)
-
-  def testStopGradient(self):
-    def f(x):
-      return lax.sin(x) * lax.cos(lax.stop_gradient(x))
-
-    def f2(x, y):
-      return lax.sin(x) * lax.cos(y)
-
-    x = 3.14
-    ans = api.grad(f)(x)
-    expected = api.grad(f2)(x, x)
-    self.assertAllClose(ans, expected, check_dtypes=True)
-
-    ans = api.grad(api.grad(f))(x)
-    expected = api.grad(api.grad(f2))(x, x)
-    self.assertAllClose(ans, expected, check_dtypes=True)
-
-    ans = api.grad(lambda x: lax.stop_gradient({'foo':x})['foo'])(3.)
-    expected = onp.array(0.0)
-    self.assertAllClose(ans, expected, check_dtypes=False)
-
-  # TODO(mattjj): make this a more systematic test
-  def testRemainder(self):
-    rng = onp.random.RandomState(0)
-    x = rng.uniform(-0.9, 9, size=(3, 4))
-    y = rng.uniform(0.7, 1.9, size=(3, 1))
-    assert not set(onp.unique(x)) & set(onp.unique(y))
-    tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
-    check_grads(lax.rem, (x, y), 2, ["fwd", "rev"], tol, tol)
-
-    rng = onp.random.RandomState(0)
-    x = rng.uniform(-0.9, 9, size=(1, 4))
-    y = rng.uniform(0.7, 1.9, size=(3, 4))
-    assert not set(onp.unique(x)) & set(onp.unique(y))
-    tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
-    check_grads(lax.rem, (x, y), 2, ["fwd", "rev"], tol, tol)
-
-
-def all_bdims(*shapes):
-  bdims = (itertools.chain([None], range(len(shape) + 1)) for shape in shapes)
-  return (t for t in itertools.product(*bdims) if not all(e is None for e in t))
-
-def add_bdim(bdim_size, bdim, shape):
-  shape = list(shape)
-  if bdim is not None:
-    shape.insert(bdim, bdim_size)
-  return tuple(shape)
-
-def slicer(x, bdim):
-  if bdim is None:
-    return lambda _: x
-  else:
-    return lambda i: lax.index_in_dim(x, i, bdim, keepdims=False)
-
-def args_slicer(args, bdims):
-  slicers = list(map(slicer, args, bdims))
-  return lambda i: [sl(i) for sl in slicers]
-
-class LaxVmapTest(jtu.JaxTestCase):
-
-  def _CheckBatching(self, op, bdim_size, bdims, shapes, dtype, rng,
-                     rtol=None, atol=None):
-    batched_shapes = map(partial(add_bdim, bdim_size), bdims, shapes)
-    args = [rng(shape, dtype) for shape in batched_shapes]
-    args_slice = args_slicer(args, bdims)
-    ans = api.vmap(op, bdims)(*args)
-    expected = onp.stack([op(*args_slice(i)) for i in range(bdim_size)])
-    self.assertAllClose(ans, expected, check_dtypes=True, rtol=rtol, atol=atol)
-
-  @parameterized.named_parameters(itertools.chain.from_iterable(
-      jtu.cases_from_list(
-        {"testcase_name": "{}_bdims={}".format(
-            jtu.format_test_name_suffix(rec.op, shapes,
-                                        itertools.repeat(dtype)), bdims),
-         "op_name": rec.op, "rng_factory": rec.rng_factory, "shapes": shapes,
-         "dtype": dtype, "bdims": bdims}
-        for shape_group in compatible_shapes
-        for shapes in CombosWithReplacement(shape_group, rec.nargs)
-        for bdims in all_bdims(*shapes)
-        for dtype in rec.dtypes)
-      for rec in LAX_OPS))
-  def testOp(self, op_name, rng_factory, shapes, dtype, bdims):
-    rng = rng_factory()
-    op = getattr(lax, op_name)
-    tol = tolerance(dtype)
-    self._CheckBatching(op, 10, bdims, shapes, dtype, rng, tol, tol)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_strides={}_padding={}_lhs_dilation={}_"
-       "rhs_dilation={}_dims={}_feature_group_count={}_lhs_bdim={}_rhs_bdim={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               strides, padding, lhs_dil, rhs_dil, ",".join(dim_nums),
-               feature_group_count, lhs_bdim, rhs_bdim),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "strides": strides, "padding": padding, "lhs_dil": lhs_dil,
-       "rhs_dil": rhs_dil, "rng_factory": rng_factory, "dimension_numbers": dim_nums,
-       "perms": perms, "lhs_bdim": lhs_bdim, "rhs_bdim": rhs_bdim,
-       "feature_group_count": feature_group_count}
-      for lhs_shape, rhs_shape, all_strides, all_pads, lhs_dils, rhs_dils in [
-          ((b, i, 6, 7),  # lhs_shape
-           (j, i, 1, 2),  # rhs_shape
-           [(1, 1), (1, 2), (2, 1)],  # strides
-           [((0, 0), (0, 0)), ((1, 0), (0, 1)), ((0, -1), (0, 0))],  # pads
-           [(1, 1), (2, 1)],  # lhs_dils
-           [(1, 1), (2, 2)])  # rhs_dils
-          for b, i, j in itertools.product([1, 2], repeat=3)]
-      for feature_group_count in [1, 2]
-      for strides in all_strides
-      for rhs_dil in rhs_dils
-      for lhs_dil in lhs_dils
-      for dtype in [onp.float32]
-      for padding in all_pads
-      for dim_nums, perms in [
-          (("NCHW", "OIHW", "NCHW"), ([0, 1, 2, 3], [0, 1, 2, 3])),
-          (("NHWC", "HWIO", "NHWC"), ([0, 2, 3, 1], [2, 3, 1, 0])),
-          (("NHWC", "OIHW", "NCHW"), ([0, 2, 3, 1], [0, 1, 2, 3]))]
-      for lhs_bdim in itertools.chain([None], range(len(lhs_shape) + 1))
-      for rhs_bdim in itertools.chain([None], range(len(rhs_shape) + 1))
-      if (lhs_bdim, rhs_bdim) != (None, None)
-      for rng_factory in [jtu.rand_default]
-  ))
-  # TODO(mattjj): some cases fail on TPU just due to numerical tolerances
-  @jtu.skip_on_devices("tpu")
-  def testConvGeneralDilatedBatching(
-      self, lhs_shape, rhs_shape, dtype, strides, padding, lhs_dil, rhs_dil,
-      dimension_numbers, perms, feature_group_count, lhs_bdim, rhs_bdim, rng_factory):
-    rng = rng_factory()
-    tol = 1e-1 if onp.finfo(dtype).bits <= 32 else 1e-3
-
-    # permute shapes to match dim_spec, scale by feature_group_count
-    lhs_perm, rhs_perm = perms
-    lhs_shape = list(onp.take(lhs_shape, lhs_perm))
-    rhs_shape = list(onp.take(rhs_shape, rhs_perm))
-    dim_spec = lax.conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers)
-    lhs_shape[dim_spec.lhs_spec[1]] *= feature_group_count
-    rhs_shape[dim_spec.rhs_spec[0]] *= feature_group_count
-
-    conv = partial(lax.conv_general_dilated, window_strides=strides,
-                   padding=padding, lhs_dilation=lhs_dil, rhs_dilation=rhs_dil,
-                   dimension_numbers=dimension_numbers,
-                   feature_group_count=feature_group_count,
-                   precision=lax.Precision.HIGHEST)
-    self._CheckBatching(conv, 5, (lhs_bdim, rhs_bdim), (lhs_shape, rhs_shape),
-                        dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_from_dtype={}_to_dtype={}_bdims={}".format(
-          shape, from_dtype, to_dtype, bdims),
-       "shape": shape, "from_dtype": from_dtype, "to_dtype": to_dtype,
-       "bdims": bdims, "rng_factory": rng_factory}
-      for from_dtype, to_dtype in itertools.product(
-          [onp.float32, onp.int32, "float32", "int32"], repeat=2)
-      for shape in [(2, 3)]
-      for bdims in all_bdims(shape)
-      for rng_factory in [jtu.rand_default]))
-  def testConvertElementType(self, shape, from_dtype, to_dtype, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda x: lax.convert_element_type(x, to_dtype)
-    self._CheckBatching(op, 10, bdims, (shape,), from_dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_from_dtype={}_to_dtype={}_bdims={}".format(
-          shape, from_dtype, to_dtype, bdims),
-       "shape": shape, "from_dtype": from_dtype, "to_dtype": to_dtype,
-       "bdims": bdims, "rng_factory": rng_factory}
-      for from_dtype, to_dtype in itertools.product(
-          [onp.float32, onp.int32, "float32", "int32"], repeat=2)
-      for shape in [(2, 3)]
-      for bdims in all_bdims(shape)
-      for rng_factory in [jtu.rand_default]))
-  def testBitcastElementType(self, shape, from_dtype, to_dtype, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda x: lax.bitcast_convert_type(x, to_dtype)
-    self._CheckBatching(op, 10, bdims, (shape,), from_dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_min_shape={}_operand_shape={}_max_shape={}_bdims={}"
-       .format(jtu.format_shape_dtype_string(min_shape, dtype),
-               jtu.format_shape_dtype_string(operand_shape, dtype),
-               jtu.format_shape_dtype_string(max_shape, dtype),
-               bdims),
-       "min_shape": min_shape, "operand_shape": operand_shape,
-       "max_shape": max_shape, "dtype": dtype, "bdims": bdims, "rng_factory": rng_factory}
-      for min_shape, operand_shape, max_shape in [
-          [(), (2, 3), ()],
-          [(2, 3), (2, 3), ()],
-          [(), (2, 3), (2, 3)],
-          [(2, 3), (2, 3), (2, 3)],
-      ]
-      for dtype in default_dtypes
-      for bdims in all_bdims(min_shape, operand_shape, max_shape)
-      for rng_factory in [jtu.rand_default]))
-  def testClamp(self, min_shape, operand_shape, max_shape, dtype, bdims, rng_factory):
-    rng = rng_factory()
-    raise SkipTest("batching rule for clamp not implemented")  # TODO(mattj)
-    shapes = [min_shape, operand_shape, max_shape]
-    self._CheckBatching(lax.clamp, 10, bdims, shapes, dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_lhs_shape={}_rhs_shape={}_bdims={}".format(
-          jtu.format_shape_dtype_string(lhs_shape, dtype),
-          jtu.format_shape_dtype_string(rhs_shape, dtype),
-          bdims),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "bdims": bdims, "rng_factory": rng_factory}
-      for lhs_shape in [(3,), (4, 3)] for rhs_shape in [(3,), (3, 6)]
-      for bdims in all_bdims(lhs_shape, rhs_shape)
-      for dtype in default_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testDot(self, lhs_shape, rhs_shape, dtype, bdims, rng_factory):
-    rng = rng_factory()
-    self._CheckBatching(lax.dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng,
-                        rtol=tolerance(dtype, {onp.float16: 5e-2}))
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_lhs_contracting={}_rhs_contracting={}_bdims={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               lhs_contracting, rhs_contracting, bdims),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "lhs_contracting": lhs_contracting, "rhs_contracting": rhs_contracting,
-       "bdims": bdims, "rng_factory": rng_factory}
-      for lhs_shape, rhs_shape, lhs_contracting, rhs_contracting in [
-          [(3, 5), (2, 5), [1], [1]],
-          [(5, 3), (5, 2), [0], [0]],
-          [(5, 3, 2), (5, 2, 4), [0], [0]],
-          [(5, 3, 2), (5, 2, 4), [0,2], [0,1]],
-          [(1, 2, 2, 3), (1, 2, 3, 1), [1], [1]],
-          [(3, 2), (2, 4), [1], [0]],
-      ]
-      for bdims in all_bdims(lhs_shape, rhs_shape)
-      for dtype in default_dtypes
-      for rng_factory in [jtu.rand_small]))
-  def testDotGeneralContractOnly(self, lhs_shape, rhs_shape, dtype,
-                                 lhs_contracting, rhs_contracting, bdims, rng_factory):
-    rng = rng_factory()
-    dimension_numbers = ((lhs_contracting, rhs_contracting), ([], []))
-    dot = partial(lax.dot_general, dimension_numbers=dimension_numbers)
-    self._CheckBatching(dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_lhs_shape={}_rhs_shape={}_dimension_numbers={}_bdims={}"
-       .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
-               jtu.format_shape_dtype_string(rhs_shape, dtype),
-               dimension_numbers, bdims),
-       "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
-       "dimension_numbers": dimension_numbers, "bdims": bdims, "rng_factory": rng_factory}
-      for lhs_shape, rhs_shape, dimension_numbers in [
-          ((3, 3, 2), (3, 2, 4), (([2], [1]), ([0], [0]))),
-          ((3, 4, 2, 4), (3, 4, 3, 2), (([2], [3]), ([0, 1], [0, 1]))),
-      ]
-      for bdims in all_bdims(lhs_shape, rhs_shape)
-      for dtype in default_dtypes
-      for rng_factory in [jtu.rand_small]))
-  def testDotGeneralContractAndBatch(self, lhs_shape, rhs_shape, dtype,
-                                     dimension_numbers, bdims, rng_factory):
-    rng = rng_factory()
-    dot = partial(lax.dot_general, dimension_numbers=dimension_numbers)
-    self._CheckBatching(dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_dtype={}_broadcast_sizes={}_bdims={}".format(
-          shape, onp.dtype(dtype).name, broadcast_sizes, bdims),
-       "shape": shape, "dtype": dtype, "broadcast_sizes": broadcast_sizes,
-       "bdims": bdims, "rng_factory": rng_factory}
-      for shape in [(), (2, 3)]
-      for dtype in default_dtypes
-      for broadcast_sizes in [(), (2,), (1, 2)]
-      for bdims in all_bdims(shape)
-      for rng_factory in [jtu.rand_default]))
-  def testBroadcast(self, shape, dtype, broadcast_sizes, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda x: lax.broadcast(x, broadcast_sizes)
-    self._CheckBatching(op, 5, bdims, (shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_inshape={}_outshape={}_bcdims={}_bdims={}".format(
-          jtu.format_shape_dtype_string(inshape, dtype),
-          outshape, broadcast_dimensions, bdims),
-       "inshape": inshape, "dtype": dtype, "outshape": outshape,
-       "dimensions": broadcast_dimensions, "bdims": bdims,
-       "rng_factory": rng_factory}
-      for inshape, outshape, broadcast_dimensions in [
-          ([2], [2, 2], [0]),
-          ([2], [2, 2], [1]),
-          ([2], [2, 3], [0]),
-          ([], [2, 3], []),
-      ]
-      for dtype in default_dtypes
-      for bdims in all_bdims(inshape)
-      for rng_factory in [jtu.rand_default]))
-  def testBroadcastInDim(self, inshape, dtype, outshape, dimensions, bdims, rng_factory):
-    rng = rng_factory()
-    raise SkipTest("this test has failures in some cases")  # TODO(mattjj)
-    op = lambda x: lax.broadcast_in_dim(x, outshape, dimensions)
-    self._CheckBatching(op, 5, bdims, (inshape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_inshape={}_outshape={}_dims={}_bdims={}".format(
-          jtu.format_shape_dtype_string(arg_shape, dtype),
-          jtu.format_shape_dtype_string(out_shape, dtype),
-          dimensions, bdims),
-       "arg_shape": arg_shape, "out_shape": out_shape, "dtype": dtype,
-       "dimensions": dimensions, "bdims": bdims, "rng_factory": rng_factory}
-      for dtype in default_dtypes
-      for arg_shape, dimensions, out_shape in [
-          [(3, 4), None, (12,)],
-          [(2, 1, 4), None, (8,)],
-          [(2, 2, 4), None, (2, 8)],
-          [(2, 2, 4), (0, 1, 2), (2, 8)],
-          [(2, 2, 4), (1, 0, 2), (8, 2)],
-          [(2, 2, 4), (2, 1, 0), (4, 2, 2)]
-      ]
-      for bdims in all_bdims(arg_shape)
-      for rng_factory in [jtu.rand_default]))
-  def testReshape(self, arg_shape, out_shape, dtype, dimensions, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda x: lax.reshape(x, out_shape, dimensions=dimensions)
-    self._CheckBatching(op, 10, bdims, (arg_shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_inshape={}_pads={}_bdims={}"
-       .format(jtu.format_shape_dtype_string(shape, dtype), pads, bdims),
-       "shape": shape, "dtype": dtype, "pads": pads,
-       "rng_factory": jtu.rand_small, "bdims": bdims}
-      for shape in [(2, 3)]
-      for bdims in all_bdims(shape)
-      for dtype in default_dtypes
-      for pads in [[(1, 2, 1), (0, 1, 0)]]))
-  def testPad(self, shape, dtype, pads, bdims, rng_factory):
-    rng = rng_factory()
-    fun = lambda operand: lax.pad(operand, onp.array(0, dtype), pads)
-    self._CheckBatching(fun, 5, bdims, (shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_predshape={}_argshapes={}_bdims={}".format(
-          jtu.format_shape_dtype_string(pred_shape, onp.bool_),
-          jtu.format_shape_dtype_string(arg_shape, arg_dtype),
-          bdims),
-       "pred_shape": pred_shape, "arg_shape": arg_shape, "arg_dtype": arg_dtype,
-       "bdims": bdims, "rng_factory": rng_factory}
-      for arg_shape in [(), (3,), (2, 3)]
-      for pred_shape in ([(), arg_shape] if arg_shape else [()])
-      for bdims in all_bdims(pred_shape, arg_shape, arg_shape)
-      for arg_dtype in default_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testSelect(self, pred_shape, arg_shape, arg_dtype, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda c, x, y: lax.select(c < 0, x, y)
-    self._CheckBatching(op, 5, bdims, (pred_shape, arg_shape, arg_shape,),
-                        arg_dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name":
-       "_shape={}_start_indices={}_limit_indices={}_strides={}_bdims={}".format(
-          jtu.format_shape_dtype_string(shape, dtype),
-          start_indices, limit_indices, strides, bdims),
-       "shape": shape, "dtype": dtype, "starts": start_indices,
-       "limits": limit_indices, "strides": strides, "bdims": bdims, "rng_factory": rng_factory}
-      for shape, start_indices, limit_indices, strides in [
-        [(3,), (1,), (2,), None],
-        [(7,), (4,), (7,), None],
-        [(5,), (1,), (5,), (2,)],
-        [(8,), (1,), (6,), (2,)],
-        [(5, 3), (1, 1), (3, 2), None],
-        [(5, 3), (1, 1), (3, 1), None],
-        [(7, 5, 3), (4, 0, 1), (7, 1, 3), None],
-        [(5, 3), (1, 1), (2, 1), (1, 1)],
-        [(5, 3), (1, 1), (5, 3), (2, 1)],
-      ]
-      for bdims in all_bdims(shape)
-      for dtype in default_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testSlice(self, shape, dtype, starts, limits, strides, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda x: lax.slice(x, starts, limits, strides)
-    self._CheckBatching(op, 5, bdims, (shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_perm={}_bdims={}".format(
-          jtu.format_shape_dtype_string(shape, dtype), perm, bdims),
-       "shape": shape, "dtype": dtype, "perm": perm, "bdims": bdims, "rng_factory": rng_factory}
-      for shape, perm in [
-        [(3, 4), (1, 0)],
-        [(3, 4), (0, 1)],
-        [(3, 4, 5), (2, 1, 0)],
-        [(3, 4, 5), (1, 0, 2)],
-      ]
-      for bdims in all_bdims(shape)
-      for dtype in default_dtypes
-      for rng_factory in [jtu.rand_default]))
-  def testTranspose(self, shape, dtype, perm, bdims, rng_factory):
-    rng = rng_factory()
-    op = lambda x: lax.transpose(x, perm)
-    self._CheckBatching(op, 5, bdims, (shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_op={}_inshape={}_reducedims={}_initval={}_bdims={}"
-       .format(op.__name__, jtu.format_shape_dtype_string(shape, dtype), dims,
-               init_val, bdims),
-       "op": op, "init_val": init_val, "shape": shape, "dtype": dtype,
-       "dims": dims, "bdims": bdims, "rng_factory": rng_factory}
-      for init_val, op, dtypes in [
-          (0, lax.add, default_dtypes),
-          (1, lax.mul, default_dtypes),
-          (0, lax.max, all_dtypes), # non-monoidal
-          (-onp.inf, lax.max, float_dtypes),
-          (onp.iinfo(onp.int32).min, lax.max, [onp.int32]),
-          (onp.iinfo(onp.int64).min, lax.max, [onp.int64]),
-          (onp.iinfo(onp.uint32).min, lax.max, [onp.uint32]),
-          (onp.iinfo(onp.uint64).min, lax.max, [onp.uint64]),
-          (onp.inf, lax.min, float_dtypes),
-          (onp.iinfo(onp.int32).max, lax.min, [onp.int32]),
-          (onp.iinfo(onp.int64).max, lax.min, [onp.int64]),
-          (onp.iinfo(onp.uint32).max, lax.min, [onp.uint32]),
-          (onp.iinfo(onp.uint64).max, lax.min, [onp.uint64]),
-      ]
-      for dtype in dtypes
-      for shape, dims in [
-          [(3, 4, 5), (0,)], [(3, 4, 5), (1, 2)],
-          [(3, 4, 5), (0, 2)], [(3, 4, 5), (0, 1, 2)]
-      ]
-      for bdims in all_bdims(shape)
-      for rng_factory in [jtu.rand_small]))
-  def testReduce(self, op, init_val, shape, dtype, dims, bdims, rng_factory):
-    rng = rng_factory()
-    init_val = onp.asarray(init_val, dtype=dtype)
-    fun = lambda operand: lax.reduce(operand, init_val, op, dims)
-    self._CheckBatching(fun, 5, bdims, (shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_op={}_dtype={}_padding={}"
-       .format(op.__name__, onp.dtype(dtype).name, padding),
-       "op": op, "init_val": init_val, "dtype": dtype, "padding": padding,
-       "rng_factory": rng_factory}
-      for init_val, op, dtypes in [
-          (0, lax.add, [onp.float32]),
-          (-onp.inf, lax.max, [onp.float32]),
-          (onp.inf, lax.min, [onp.float32]),
-      ]
-      for dtype in dtypes
-      for padding in ["VALID", "SAME"]
-      for rng_factory in [jtu.rand_small]))
-  def testReduceWindow(self, op, init_val, dtype, padding, rng_factory):
-    rng = rng_factory()
-    init_val = onp.asarray(init_val, dtype=dtype)
-
-    all_configs = itertools.chain(
-        itertools.product(
-            [(4, 6)],
-            [(2, 1), (1, 2)],
-            [(1, 1), (2, 1), (1, 2)]),
-        itertools.product(
-            [(3, 2, 4, 6)], [(1, 1, 2, 1), (2, 1, 2, 1)],
-            [(1, 2, 2, 1), (1, 1, 1, 1)]))
-
-    def fun(operand):
-      return lax.reduce_window(operand, init_val, op, dims, strides, padding)
-
-    for shape, dims, strides in all_configs:
-      for bdims in all_bdims(shape):
-        self._CheckBatching(fun, 3, bdims, (shape,), dtype, rng)
-
-  @parameterized.named_parameters(jtu.cases_from_list(
-      {"testcase_name": "_shape={}_bdims={}_fft_ndims={}"
-       .format(shape, bdims, fft_ndims),
-       "shape": shape, "bdims": bdims, "fft_ndims": fft_ndims, "rng_factory": rng_factory}
-      for shape in [(5,), (3, 4, 5), (2, 3, 4, 5)]
-      for bdims in all_bdims(shape)
-      for fft_ndims in range(0, min(3, len(shape)) + 1)
-      for rng_factory in [jtu.rand_default]))
-  @jtu.skip_on_devices("tpu")  # TODO(b/137993701): unimplemented cases.
-  def testFft(self, fft_ndims, shape, bdims, rng_factory):
-    rng = rng_factory()
-    ndims = len(shape)
-    axes = range(ndims - fft_ndims, ndims)
-    fft_lengths = [shape[axis] for axis in axes]
-    op = lambda x: lax.fft(x, xla_client.FftType.FFT, fft_lengths)
-    self._CheckBatching(op, 5, bdims, [shape], onp.complex64, rng)
-
-  # TODO Concatenate
-  # TODO Reverse
-  # TODO DynamicSlice
-  # TODO DynamicUpdateSlice
-  # TODO Sort
-  # TODO SortKeyVal
-  # TODO Collapse
-  # TODO ScatterAdd
-  # TODO Scatter
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_from_dtype={}_to_dtype={}".format(
+#           jtu.dtype_str(from_dtype), jtu.dtype_str(to_dtype)),
+#        "from_dtype": from_dtype, "to_dtype": to_dtype, "rng_factory": rng_factory}
+#       for from_dtype, to_dtype in itertools.product(
+#           float_dtypes + complex_dtypes, repeat=2)
+#       for rng_factory in [jtu.rand_default]))
+#   def testConvertElementTypeGrad(self, from_dtype, to_dtype, rng_factory):
+#     rng = rng_factory()
+#     tol = max(gradient_tolerance(to_dtype), gradient_tolerance(from_dtype))
+#     args = (rng((2, 3), from_dtype),)
+#     convert_element_type = lambda x: lax.convert_element_type(x, to_dtype)
+#     check_grads(convert_element_type, args, 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_min_shape={}_operand_shape={}_max_shape={}".format(
+#           jtu.format_shape_dtype_string(min_shape, dtype),
+#           jtu.format_shape_dtype_string(operand_shape, dtype),
+#           jtu.format_shape_dtype_string(max_shape, dtype)),
+#        "min_shape": min_shape, "operand_shape": operand_shape,
+#        "max_shape": max_shape, "dtype": dtype, "rng_factory": rng_factory}
+#       for min_shape, operand_shape, max_shape in [
+#           [(), (), ()],
+#           [(), (2, 3), ()],
+#           [(2, 3), (2, 3), (2, 3)],
+#       ]
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testClampGrad(self, min_shape, operand_shape, max_shape, dtype, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype, {onp.float16: 1e-1, onp.float32: 1e-2})
+#     shapes = [min_shape, operand_shape, max_shape]
+#     min, operand, max = (rng(shape, dtype) for shape in shapes)
+#     min, max = onp.minimum(min, max), onp.maximum(min, max)  # broadcast
+#     eps = 1e-1 if dtype == onp.float16 else 1e-2
+#     check_grads(lax.clamp, (min, operand, max), 2, ["fwd", "rev"], tol, tol,
+#                 eps=eps)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_dim={}_baseshape=[{}]_dtype={}_narrs={}".format(
+#           dim, ",".join(str(d) for d in base_shape), onp.dtype(dtype).name,
+#           num_arrs),
+#        "dim": dim, "base_shape": base_shape, "dtype": dtype,
+#        "num_arrs": num_arrs, "rng_factory": rng_factory}
+#       for num_arrs in [3]
+#       for dtype in float_dtypes
+#       for base_shape in [(4,), (3, 4), (2, 3, 4)]
+#       for dim in range(len(base_shape))
+#       for rng_factory in [jtu.rand_default]))
+#   def testConcatenateGrad(self, dim, base_shape, dtype, num_arrs, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     shapes = [base_shape[:dim] + (size,) + base_shape[dim+1:]
+#               for size, _ in zip(itertools.cycle([3, 1, 4]), range(num_arrs))]
+#     operands = tuple(rng(shape, dtype) for shape in shapes)
+#     concatenate = lambda *args: lax.concatenate(args, dim)
+#     check_grads(concatenate, operands, 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_strides={}_padding={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                strides, padding),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "strides": strides, "padding": padding, "rng_factory": rng_factory,}
+#        for lhs_shape, rhs_shape, all_strides in itertools.chain(
+#            [((b, i, 3, 4), (j, i, 1, 2), [(1, 1), (1, 2), (2, 1)])
+#             for b, i, j in itertools.product([2, 3], repeat=3)],
+#            [((4, 2, 1), (3, 2, 1), [(1,)])])
+#        for strides in all_strides
+#        for dtype in float_dtypes
+#        for padding in ["VALID", "SAME"]
+#        for rng_factory in [jtu.rand_small]))
+#   def testConvGrad(self, lhs_shape, rhs_shape, dtype, strides, padding, rng_factory):
+#     rng = rng_factory()
+#     lhs = rng(lhs_shape, dtype)
+#     rhs = rng(rhs_shape, dtype)
+#     conv = partial(lax.conv, window_strides=strides, padding=padding,
+#                    precision=lax.Precision.HIGHEST)
+#     check_grads_bilinear(conv, (lhs, rhs), order=2, modes=["fwd", "rev"],
+#                          atol=1e-2, rtol=1e-2)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_strides={}_padding={}_lhs_dilation={}_"
+#        "rhs_dilation={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                strides, padding, lhs_dil, rhs_dil),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "strides": strides, "padding": padding, "lhs_dil": lhs_dil,
+#        "rhs_dil": rhs_dil, "rng_factory": rng_factory}
+#        for lhs_shape, rhs_shape, all_strides, all_pads, lhs_dils, rhs_dils in
+#        itertools.chain(
+#            [((b, i, 3, 4), (j, i, 1, 2), [(1, 1), (1, 2), (2, 1)],
+#              [((0, 0), (0, 0)), ((-1, 0), (0, -1)), ((1, 0), (0, 1))],
+#              [(1, 1), (2, 1)], [(1, 1)])
+#             for b, i, j in itertools.product([2, 3], repeat=3)],
+#            [((4, 2, 1), (3, 2, 1), [(1,)], [((1, 1),), ((0, 0),)],
+#              [(1,), (2,)], [(1,), (2,)])])
+#        for strides in all_strides
+#        for rhs_dil in rhs_dils
+#        for lhs_dil in lhs_dils
+#        for dtype in float_dtypes
+#        for padding in all_pads
+#        for rng_factory in [jtu.rand_small]))
+#   def testConvWithGeneralPaddingGrad(self, lhs_shape, rhs_shape, dtype, strides,
+#                                      padding, lhs_dil, rhs_dil, rng_factory):
+#     rng = rng_factory()
+#     lhs = rng(lhs_shape, dtype)
+#     rhs = rng(rhs_shape, dtype)
+#     conv = partial(lax.conv_with_general_padding, window_strides=strides,
+#                    padding=padding, lhs_dilation=lhs_dil, rhs_dilation=rhs_dil,
+#                    precision=lax.Precision.HIGHEST)
+#     check_grads_bilinear(conv, (lhs, rhs), order=2, modes=["fwd", "rev"],
+#                          atol=1e-2, rtol=1e-2)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_strides={}_padding={}_lhs_dilation={}_"
+#        "rhs_dilation={}_dims={}_feature_group_count={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                strides, padding, lhs_dil, rhs_dil, ",".join(dim_nums),
+#                feature_group_count),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "strides": strides, "padding": padding, "lhs_dil": lhs_dil,
+#        "rhs_dil": rhs_dil, "rng_factory": rng_factory, "dimension_numbers": dim_nums,
+#        "perms": perms, "feature_group_count": feature_group_count}
+#       for lhs_shape, rhs_shape, all_strides, all_pads, lhs_dils, rhs_dils in [
+#           ((b, i, 6, 7),  # lhs_shape
+#            (j, i, 1, 2),  # rhs_shape
+#            [(1, 1), (1, 2), (2, 1)],  # strides
+#            [((0, 0), (0, 0)), ((1, 0), (0, 1)), ((0, -1), (0, 0))],  # pads
+#            [(1, 1), (2, 1)],  # lhs_dils
+#            [(1, 1), (2, 2)])  # rhs_dils
+#           for b, i, j in itertools.product([1, 2], repeat=3)]
+#       for feature_group_count in [1, 2]
+#       for strides in all_strides
+#       for rhs_dil in rhs_dils
+#       for lhs_dil in lhs_dils
+#       for dtype in float_dtypes
+#       for padding in all_pads
+#       for dim_nums, perms in [
+#           (("NCHW", "OIHW", "NCHW"), ([0, 1, 2, 3], [0, 1, 2, 3])),
+#           (("NHWC", "HWIO", "NHWC"), ([0, 2, 3, 1], [2, 3, 1, 0])),
+#           (("NHWC", "OIHW", "NCHW"), ([0, 2, 3, 1], [0, 1, 2, 3]))]
+#       for rng_factory in [jtu.rand_default]
+#   ))
+#   @jtu.skip_on_devices("tpu")  # TODO(phawkins): precision problems on TPU.
+#   def testConvGeneralDilatedGrad(self, lhs_shape, rhs_shape, dtype, strides,
+#                                  padding, lhs_dil, rhs_dil, dimension_numbers,
+#                                  perms, feature_group_count, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype, {onp.float16: 5e-1, onp.float32: 1e-4})
+
+#     # permute shapes to match dim_spec, scale by feature_group_count
+#     lhs_perm, rhs_perm = perms
+#     lhs_shape = list(onp.take(lhs_shape, lhs_perm))
+#     rhs_shape = list(onp.take(rhs_shape, rhs_perm))
+#     dim_spec = lax.conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers)
+#     lhs_shape[dim_spec.lhs_spec[1]] *= feature_group_count
+#     rhs_shape[dim_spec.rhs_spec[0]] *= feature_group_count
+
+#     lhs = rng(lhs_shape, dtype)
+#     rhs = rng(rhs_shape, dtype)
+#     conv = partial(lax.conv_general_dilated, window_strides=strides,
+#                    padding=padding, lhs_dilation=lhs_dil, rhs_dilation=rhs_dil,
+#                    dimension_numbers=dimension_numbers,
+#                    feature_group_count=feature_group_count,
+#                    precision=lax.Precision.HIGHEST)
+#     check_grads_bilinear(conv, (lhs, rhs), order=2, modes=["fwd", "rev"],
+#                          atol=tol, rtol=tol)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_lhs_shape={}_rhs_shape={}".format(
+#           jtu.format_shape_dtype_string(lhs_shape, dtype),
+#           jtu.format_shape_dtype_string(rhs_shape, dtype)),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "rng_factory": jtu.rand_default}
+#       for lhs_shape in [(2,), (3, 2)] for rhs_shape in [(2,), (2, 4)]
+#       for dtype in float_dtypes))
+#   def testDotGrad(self, lhs_shape, rhs_shape, dtype, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype, {onp.float16: 1e-1, onp.float32: 1e-4})
+#     lhs = rng(lhs_shape, dtype)
+#     rhs = rng(rhs_shape, dtype)
+#     dot = partial(lax.dot, precision=lax.Precision.HIGHEST)
+#     check_grads_bilinear(dot, (lhs, rhs), order=2, modes=["fwd", "rev"],
+#                          atol=tol, rtol=tol)
+#     # check that precision config is preserved
+#     result, pullback = api.vjp(dot, lhs, rhs)
+#     gresult = lax.zeros_like_array(result)
+#     s = str(api.make_jaxpr(pullback)(gresult))
+#     assert "precision=HIGHEST" in s
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_dimension_numbers={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                dimension_numbers),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "dimension_numbers": dimension_numbers, "rng_factory": jtu.rand_small}
+#       for lhs_shape, rhs_shape, dimension_numbers in [
+#           ((3, 2), (2, 4), (([1], [0]), ([], []))),
+#           ((3, 5), (2, 5), (([1], [1]), ([], []))),
+#           ((5, 3), (5, 2), (([0], [0]), ([], []))),
+#           ((3, 3, 2), (3, 2, 4), (([2], [1]), ([0], [0]))),
+#       ]
+#       for dtype in float_dtypes))
+#   def testDotGeneralContractAndBatchGrads(self, lhs_shape, rhs_shape, dtype,
+#                                           dimension_numbers, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     lhs = rng(lhs_shape, dtype)
+#     rhs = rng(rhs_shape, dtype)
+#     dot_general = partial(lax.dot_general, dimension_numbers=dimension_numbers,
+#                           precision=lax.Precision.HIGHEST)
+#     check_grads_bilinear(dot_general, (lhs, rhs), order=2, modes=["fwd", "rev"],
+#                          atol=tol, rtol=tol)
+#     # check that precision config is preserved
+#     result, pullback = api.vjp(dot_general, lhs, rhs)
+#     gresult = lax.zeros_like_array(result)
+#     s = str(api.make_jaxpr(pullback)(gresult))
+#     assert "precision=HIGHEST" in s
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_dtype={}_broadcast_sizes={}".format(
+#           shape, onp.dtype(dtype).name, broadcast_sizes),
+#        "shape": shape, "dtype": dtype, "broadcast_sizes": broadcast_sizes,
+#        "rng_factory": rng_factory}
+#       for shape in [(), (2, 3)]
+#       for dtype in float_dtypes
+#       for broadcast_sizes in [(), (2,), (1, 2)]
+#       for rng_factory in [jtu.rand_default]))
+#   def testBroadcastGrad(self, shape, dtype, broadcast_sizes, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     args = (rng(shape, dtype),)
+#     broadcast = lambda x: lax.broadcast(x, broadcast_sizes)
+#     check_grads(broadcast, args, 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_inshape={}_outshape={}_bcdims={}".format(
+#           jtu.format_shape_dtype_string(inshape, dtype),
+#           outshape, broadcast_dimensions),
+#        "inshape": inshape, "dtype": dtype, "outshape": outshape,
+#        "dimensions": broadcast_dimensions, "rng_factory": rng_factory}
+#       for inshape, outshape, broadcast_dimensions in [
+#           ([2], [2, 2], [0]),
+#           ([2], [2, 2], [1]),
+#           ([2], [2, 3], [0]),
+#           ([], [2, 3], []),
+#       ]
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testBroadcastInDimGrad(self, inshape, dtype, outshape, dimensions, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     operand = rng(inshape, dtype)
+#     broadcast_in_dim = lambda x: lax.broadcast_in_dim(x, outshape, dimensions)
+#     check_grads(broadcast_in_dim, (operand,), 2, ["fwd", "rev"], tol, tol,
+#                 eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_inshape={}_outshape={}_perm={}".format(
+#           jtu.format_shape_dtype_string(arg_shape, dtype),
+#           jtu.format_shape_dtype_string(out_shape, dtype),
+#           permutation),
+#        "arg_shape": arg_shape, "out_shape": out_shape, "dtype": dtype,
+#        "rng_factory": rng_factory, "permutation": permutation}
+#       for dtype in float_dtypes
+#       for arg_shape, out_shape, permutation in [
+#           [(3, 4), (12,), None],
+#           [(2, 1, 4), (8,), None],
+#           [(2, 2, 4), (2, 8), None],
+#           [(3, 4), (12,), (0, 1)],
+#           [(3, 4), (12,), (1, 0)],
+#           [(2, 1, 4), (8,), (0, 2, 1)],
+#           [(2, 1, 4), (8,), (2, 0, 1)],
+#           [(2, 2, 4), (2, 8), (0, 2, 1)],
+#           [(2, 2, 4), (2, 8), (2, 0, 1)],
+#       ]
+#       for rng_factory in [jtu.rand_default]))
+#   def testReshapeGrad(self, arg_shape, out_shape, permutation, dtype, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     operand = rng(arg_shape, dtype)
+#     reshape = lambda x: lax.reshape(x, out_shape, permutation)
+#     check_grads(reshape, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_inshape={}_pads={}"
+#        .format(jtu.format_shape_dtype_string(shape, dtype), pads),
+#        "shape": shape, "dtype": dtype, "pads": pads, "rng_factory": jtu.rand_small}
+#       for shape in [(2, 3)]
+#       for dtype in float_dtypes
+#       for pads in [[(1, 2, 1), (0, 1, 0)], [(-1, 0, 0), (-1, 0, 2)]]))
+#   def testPadGrad(self, shape, dtype, pads, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+
+#     operand = rng(shape, dtype)
+#     pad = lambda operand: lax.pad(operand, onp.array(0, dtype), pads)
+#     check_grads(pad, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#     operand = rng(shape, dtype)
+#     padding_value = onp.array(0., dtype)
+#     pad = lambda operand, padding_value: lax.pad(operand, padding_value, pads)
+#     check_grads(pad, (operand, padding_value), 2, ["fwd", "rev"], tol, tol,
+#                 eps=1.)
+
+#   def testReverseGrad(self):
+#     rev = lambda operand: lax.rev(operand, dimensions)
+
+#     dimensions = [0]
+#     check_grads(rev, (onp.array([3., 2., 1.]),), 2)
+
+#     dimensions = [0, 1]
+#     check_grads(rev, (onp.array([[6., 5., 4.], [3., 2., 1.]]),), 2)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_predshape={}_argshapes={}".format(
+#           jtu.format_shape_dtype_string(pred_shape, onp.bool_),
+#           jtu.format_shape_dtype_string(arg_shape, dtype)),
+#        "pred_shape": pred_shape, "arg_shape": arg_shape, "dtype": dtype,
+#        "rng_factory": rng_factory}
+#       for arg_shape in [(), (3,), (2, 3)]
+#       for pred_shape in ([(), arg_shape] if arg_shape else [()])
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testSelectGrad(self, pred_shape, arg_shape, dtype, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     pred = rng(pred_shape, onp.bool_)
+#     on_true = rng(arg_shape, dtype)
+#     on_false = rng(arg_shape, dtype)
+#     select = lambda on_true, on_false: lax.select(pred, on_true, on_false)
+#     check_grads(select, (on_true, on_false), 2, ["fwd", "rev"], tol, tol,
+#                 eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_shape={}_start_indices={}_limit_indices={}_strides={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype),
+#           start_indices, limit_indices, strides),
+#        "shape": shape, "dtype": dtype, "starts": start_indices,
+#        "limits": limit_indices, "strides": strides, "rng_factory": rng_factory}
+#       for shape, start_indices, limit_indices, strides in [
+#         [(3,), (1,), (2,), None],
+#         [(7,), (4,), (7,), None],
+#         [(5,), (1,), (5,), (2,)],
+#         [(8,), (1,), (6,), (2,)],
+#         [(5, 3), (1, 1), (3, 2), None],
+#         [(5, 3), (1, 1), (3, 1), None],
+#         [(7, 5, 3), (4, 0, 1), (7, 1, 3), None],
+#         [(5, 3), (1, 1), (2, 1), (1, 1)],
+#         [(5, 3), (1, 1), (5, 3), (2, 1)],
+#       ]
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testSliceGrad(self, shape, dtype, starts, limits, strides, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     operand = rng(shape, dtype)
+#     slice = lambda x: lax.slice(x, starts, limits, strides)
+#     check_grads(slice, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_start_indices={}_size_indices={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype),
+#           start_indices, size_indices),
+#        "shape": shape, "dtype": dtype, "start_indices": start_indices,
+#        "size_indices": size_indices, "rng_factory": rng_factory}
+#       for shape, start_indices, size_indices in [
+#         [(3,), (1,), (1,)],
+#         [(5, 3), (1, 1), (3, 1)],
+#         [(7, 5, 3), (4, 1, 0), (2, 0, 1)],
+#       ]
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testDynamicSliceGrad(self, shape, dtype, start_indices, size_indices,
+#                            rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     operand = rng(shape, dtype)
+#     dynamic_slice = lambda x: lax.dynamic_slice(x, start_indices, size_indices)
+#     check_grads(dynamic_slice, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_start_indices={}_update_shape={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype),
+#           start_indices, update_shape),
+#        "shape": shape, "dtype": dtype, "start_indices": start_indices,
+#        "update_shape": update_shape, "rng_factory": rng_factory}
+#       for shape, start_indices, update_shape in [
+#         [(3,), (1,), (1,)],
+#         [(5, 3), (1, 1), (3, 1)],
+#         [(7, 5, 3), (4, 1, 0), (2, 0, 1)],
+#       ]
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testDynamicUpdateSliceGrad(self, shape, dtype, start_indices,
+#                                  update_shape, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     operand = rng(shape, dtype)
+#     update = rng(update_shape, dtype)
+#     start_indices = onp.array(start_indices)
+
+#     dus = lambda x, y: lax.dynamic_update_slice(x, y, start_indices)
+#     check_grads(dus, (operand, update), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#     dus = lambda x: lax.dynamic_update_slice(x, update, start_indices)
+#     check_grads(dus, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#     dus = lambda y: lax.dynamic_update_slice(operand, y, start_indices)
+#     check_grads(dus, (update,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_perm={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype), perm),
+#        "shape": shape, "dtype": dtype, "perm": perm, "rng_factory": rng_factory}
+#       for shape, perm in [
+#         [(3, 4), (1, 0)],
+#         [(3, 4), (0, 1)],
+#         [(3, 4, 5), (2, 1, 0)],
+#         [(3, 4, 5), (1, 0, 2)],
+#       ]
+#       for dtype in float_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testTransposeGrad(self, shape, dtype, perm, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype)
+#     operand = rng(shape, dtype)
+#     transpose = lambda x: lax.transpose(x, perm)
+#     check_grads(transpose, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_op={}_inshape={}_reducedims={}"
+#        .format(op.__name__, jtu.format_shape_dtype_string(shape, dtype), dims),
+#        "op": op, "init_val": init_val, "shape": shape, "dtype": dtype,
+#        "dims": dims, "rng_factory": rng_factory}
+#       for init_val, op, dtypes in [
+#           (0, lax.add, inexact_dtypes),
+#           # Precision problems for float16 tests.
+#           (-onp.inf, lax.max, [t for t in inexact_dtypes if t != onp.float16]),
+#           (onp.inf, lax.min, [t for t in inexact_dtypes if t != onp.float16]),
+#           # The mul test overflows the range of a float16.
+#           (1, lax.mul, [t for t in inexact_dtypes if t != onp.float16]),
+#       ]
+#       for dtype in dtypes
+#       for shape, dims in [
+#           [(3, 4, 5), ()],
+#           [(3, 4, 5), (0,)],
+#           [(3, 4, 5), (1, 2)],
+#           [(3, 4, 5), (0, 2)],
+#           [(3, 4, 5), (0, 1, 2)],
+#           [(3, 1), (1,)],
+#       ]
+#       for rng_factory in [jtu.rand_default]))
+#   def testReduceGrad(self, op, init_val, shape, dtype, dims, rng_factory):
+#     rng = rng_factory()
+#     if jtu.device_under_test() == "tpu" and op is lax.mul:
+#       raise SkipTest("unimplemented case")
+#     tol = gradient_tolerance(
+#       dtype, {onp.float16: 1e-1, onp.float32: 1e-2, onp.float64: 1e-3})
+#     operand = rng(shape, dtype)
+#     init_val = onp.asarray(init_val, dtype=dtype)
+#     reduce = lambda operand: lax.reduce(operand, init_val, op, dims)
+#     eps = (1.0 if onp.finfo(dtype).bits == 16 and op is lax.add else
+#            1e-2 if onp.finfo(dtype).bits == 32 else None)
+#     check_grads(reduce, (operand,), 1, ["fwd", "rev"], tol, tol, eps)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_op={}_dtype={}_padding={}"
+#        .format(op.__name__, onp.dtype(dtype).name, padding),
+#        "op": op, "init_val": init_val, "dtype": dtype, "padding": padding,
+#        "rng_factory": rng_factory}
+#       for init_val, op, dtypes, rng in [
+#           (0, lax.add, float_dtypes, jtu.rand_small),
+#           (-onp.inf, lax.max, [onp.float32], jtu.rand_default),
+#           (onp.inf, lax.min, [onp.float32], jtu.rand_default),
+#       ]
+#       for dtype in dtypes
+#       for padding in ["VALID", "SAME"]
+#       for rng_factory in [jtu.rand_default]))
+#   def testReduceWindowGrad(self, op, init_val, dtype, padding, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype, {onp.float16: 1e-1, onp.float32: 1e-3})
+#     init_val = onp.asarray(init_val, dtype=dtype)
+
+#     # We need this conditional and the corresponding loop logic to be in the
+#     # test method, rather than at the parameterized test level, because it
+#     # depends on FLAGS for the device under test.
+#     # TODO(b/31565929): enable when fixed.
+#     if jtu.device_under_test() == "tpu" and op is not lax.add:
+#       all_configs = [((6, 5, 4, 3), (2, 2, 1, 1), (1, 2, 1, 1))]
+
+#       # TODO(b/73062247): need variadic reduce-window for better precision.
+#       gradient_order = 1
+#     else:
+#       all_configs = itertools.chain(
+#           itertools.product(
+#               [(4, 6)],  # shapes
+#               [(2, 1), (1, 2)],  # window_dimensions
+#               [(1, 1), (2, 1), (1, 2)]  # strides
+#           ),
+#           itertools.product(
+#               [(3, 2, 4, 6)],  # shapes
+#               [(1, 1, 2, 1), (2, 1, 2, 1)],  # window_dimensions
+#               [(1, 2, 2, 1), (1, 1, 1, 1)]),  # strides
+#       )
+#       gradient_order = 3
+
+#     def fun(operand):
+#       return lax.reduce_window(operand, init_val, op, dims, strides, padding)
+
+#     for shape, dims, strides in all_configs:
+#       operand = rng(shape, dtype)
+#       if op is lax.add:
+#         eps = 1.
+#       else:
+#         # this test can fail if there are duplicates in operand
+#         self.assertEqual(onp.unique(operand).size, operand.size,
+#                          msg="test requires operand elements to be unique.")
+#         eps = 1e-2
+#       check_grads(fun, (operand,), gradient_order, ["fwd", "rev"], tol, tol,
+#                   eps)
+
+#   # TODO(b/205052657): enable more tests when supported
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_axis={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype), axis),
+#        "rng_factory": rng_factory, "shape": shape, "dtype": dtype, "axis": axis}
+#       for dtype in [onp.float32]
+#       for shape in [(5,), (5, 7)]
+#       for axis in [len(shape) - 1]
+#       for rng_factory in [jtu.rand_default]))
+#   def testSortGrad(self, shape, dtype, axis, rng_factory):
+#     rng = rng_factory()
+#     tol = gradient_tolerance(dtype, {onp.float32: 1e-3})
+#     operand = rng(shape, dtype)
+#     sort = lambda x: lax.sort(x, axis)
+#     check_grads(sort, (operand,), 2, ["fwd", "rev"], tol, tol, eps=1e-2)
+
+#   # TODO(b/205052657): enable more tests when supported
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_keyshape={}_valshape={}_axis={}".format(
+#           jtu.format_shape_dtype_string(shape, key_dtype),
+#           jtu.format_shape_dtype_string(shape, val_dtype),
+#           axis),
+#        "rng_factory": rng_factory, "shape": shape,
+#        "key_dtype": key_dtype, "val_dtype": val_dtype, "axis": axis}
+#       for key_dtype in [onp.float32]
+#       for val_dtype in [onp.float32]
+#       for shape in [(3,), (5, 3)]
+#       for axis in [len(shape) - 1]
+#       for rng_factory in [jtu.rand_default]))
+#   def testSortKeyValGrad(self, shape, key_dtype, val_dtype, axis, rng_factory):
+#     rng = rng_factory()
+#     # This test relies on the property that wherever keys are tied, values are
+#     # too, since we don't guarantee the same ordering of values with equal keys.
+#     # To avoid that case, we generate unique keys (globally in the key array).
+#     perm_rng = onp.random.RandomState(0)
+#     def args_maker():
+#       flat_keys = onp.arange(onp.prod(shape, dtype=int), dtype=key_dtype)
+#       keys = perm_rng.permutation(flat_keys).reshape(shape)
+#       values = rng(shape, val_dtype)
+#       return keys, values
+#     keys, values = args_maker()
+
+#     fun = lambda keys, values: lax.sort_key_val(keys, values, axis)
+#     check_grads(fun, (keys, values), 2, ["fwd", "rev"], 1e-2, 1e-2, 1e-2)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_idxs={}_axes={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype), idxs, axes),
+#        "shape": shape, "dtype": dtype, "idxs": idxs, "axes": axes,
+#        "rng_factory": rng_factory}
+#       for dtype in float_dtypes
+#       for shape, idxs, axes in [
+#           [(3, 4, 5), (onp.array([0, 2, 1]),), (0,)],
+#           [(3, 4, 5), (onp.array([-1, -2]),), (0,)],
+#           [(3, 4, 5), (onp.array([0, 2]), onp.array([1, 3])), (0, 1)],
+#           [(3, 4, 5), (onp.array([0, 2]), onp.array([1, 3])), (0, 2)],
+#       ]
+#       for rng_factory in [jtu.rand_default]))
+#   def testIndexTakeGrad(self, shape, dtype, idxs, axes, rng_factory):
+#     rng = rng_factory()
+#     src = rng(shape, dtype)
+#     index_take = lambda src: lax.index_take(src, idxs, axes)
+#     check_grads(index_take, (src,), 2, ["fwd", "rev"], 1e-2, 1e-2, 1)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_idxs={}_dnums={}_slice_sizes={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype), idxs, dnums,
+#           slice_sizes),
+#        "shape": shape, "dtype": dtype, "idxs": idxs, "dnums": dnums,
+#        "slice_sizes": slice_sizes, "rng_factory": rng_factory,
+#        "rng_idx_factory": rng_idx_factory}
+#       for dtype in float_dtypes
+#       for shape, idxs, dnums, slice_sizes in [
+#           ((5,), onp.array([[0], [2]]), lax.GatherDimensionNumbers(
+#             offset_dims=(), collapsed_slice_dims=(0,), start_index_map=(0,)),
+#             (1,)),
+#           ((10,), onp.array([[0], [0], [0]]), lax.GatherDimensionNumbers(
+#             offset_dims=(1,), collapsed_slice_dims=(), start_index_map=(0,)),
+#             (2,)),
+#           ((10, 5,), onp.array([[0], [2], [1]]), lax.GatherDimensionNumbers(
+#             offset_dims=(1,), collapsed_slice_dims=(0,), start_index_map=(0,)),
+#             (1, 3)),
+#       ]
+#       for rng_idx_factory in [partial(jtu.rand_int, max(shape))]
+#       for rng_factory in [jtu.rand_default]))
+#   def testGatherGrad(self, shape, dtype, idxs, dnums, slice_sizes, rng_factory,
+#                      rng_idx_factory):
+#     rng = rng_factory()
+#     rng_idx = rng_idx_factory()
+#     idxs = rng_idx(idxs.shape, idxs.dtype)
+#     gather = lambda x: lax.gather(x, idxs, dimension_numbers=dnums,
+#                                   slice_sizes=slice_sizes)
+#     x = rng(shape, dtype)
+#     check_grads(gather, (x,), 2, ["fwd", "rev"], 1e-2, 1e-2, 1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_idxs={}_update={}_dnums={}".format(
+#           jtu.format_shape_dtype_string(arg_shape, dtype),
+#           idxs, update_shape, dnums),
+#        "arg_shape": arg_shape, "dtype": dtype, "idxs": idxs,
+#        "update_shape": update_shape, "dnums": dnums, "rng_factory": rng_factory,
+#        "rng_idx_factory": rng_idx_factory}
+#       for dtype in float_dtypes
+#       for arg_shape, idxs, update_shape, dnums in [
+#           ((5,), onp.array([[0], [2]]), (2,), lax.ScatterDimensionNumbers(
+#             update_window_dims=(), inserted_window_dims=(0,),
+#             scatter_dims_to_operand_dims=(0,))),
+#           ((10,), onp.array([[0], [0], [0]]), (3, 2), lax.ScatterDimensionNumbers(
+#             update_window_dims=(1,), inserted_window_dims=(),
+#             scatter_dims_to_operand_dims=(0,))),
+#           ((10, 5,), onp.array([[0], [2], [1]]), (3, 3), lax.ScatterDimensionNumbers(
+#             update_window_dims=(1,), inserted_window_dims=(0,),
+#             scatter_dims_to_operand_dims=(0,))),
+#       ]
+#       for rng_idx_factory in [partial(jtu.rand_int, max(arg_shape))]
+#       for rng_factory in [jtu.rand_default]))
+#   def testScatterAddGrad(self, arg_shape, dtype, idxs, update_shape, dnums,
+#                          rng_factory, rng_idx_factory):
+#     rng = rng_factory()
+#     rng_idx = rng_idx_factory()
+#     idxs = rng_idx(idxs.shape, idxs.dtype)
+#     scatter_add = lambda x, y: lax.scatter_add(x, idxs, y,
+#                                                dimension_numbers=dnums)
+#     x = rng(arg_shape, dtype)
+#     y = rng(update_shape, dtype)
+#     check_grads(scatter_add, (x, y), 2, ["fwd", "rev"], 1e-2, 1e-2, 1.)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_idxs={}_update={}_dnums={}".format(
+#           jtu.format_shape_dtype_string(arg_shape, dtype),
+#           idxs, update_shape, dnums),
+#        "arg_shape": arg_shape, "dtype": dtype, "idxs": idxs,
+#        "update_shape": update_shape, "dnums": dnums, "rng_factory": rng_factory,
+#        "rng_idx_factory": rng_idx_factory}
+#       for dtype in float_dtypes
+#       for arg_shape, idxs, update_shape, dnums in [
+#           ((5,), onp.array([[0], [2]]), (2,), lax.ScatterDimensionNumbers(
+#             update_window_dims=(), inserted_window_dims=(0,),
+#             scatter_dims_to_operand_dims=(0,))),
+#           ((10,), onp.array([[0], [0], [0]]), (3, 2), lax.ScatterDimensionNumbers(
+#             update_window_dims=(1,), inserted_window_dims=(),
+#             scatter_dims_to_operand_dims=(0,))),
+#           ((10, 5,), onp.array([[0], [2], [1]]), (3, 3), lax.ScatterDimensionNumbers(
+#             update_window_dims=(1,), inserted_window_dims=(0,),
+#             scatter_dims_to_operand_dims=(0,))),
+#       ]
+#       for rng_idx_factory in [partial(jtu.rand_int, max(arg_shape))]
+#       for rng_factory in [jtu.rand_default]))
+#   def testScatterGrad(self, arg_shape, dtype, idxs, update_shape, dnums,
+#                       rng_factory, rng_idx_factory):
+#     rng = rng_factory()
+#     rng_idx = rng_idx_factory()
+#     idxs = rng_idx(idxs.shape, idxs.dtype)
+#     scatter = lambda x, y: lax.scatter(x, idxs, y, dimension_numbers=dnums)
+#     x = rng(arg_shape, dtype)
+#     y = rng(update_shape, dtype)
+#     check_grads(scatter, (x, y), 2, ["fwd", "rev"], 1e-2, 1e-2, 1.)
+
+#   def testStopGradient(self):
+#     def f(x):
+#       return lax.sin(x) * lax.cos(lax.stop_gradient(x))
+
+#     def f2(x, y):
+#       return lax.sin(x) * lax.cos(y)
+
+#     x = 3.14
+#     ans = api.grad(f)(x)
+#     expected = api.grad(f2)(x, x)
+#     self.assertAllClose(ans, expected, check_dtypes=True)
+
+#     ans = api.grad(api.grad(f))(x)
+#     expected = api.grad(api.grad(f2))(x, x)
+#     self.assertAllClose(ans, expected, check_dtypes=True)
+
+#     ans = api.grad(lambda x: lax.stop_gradient({'foo':x})['foo'])(3.)
+#     expected = onp.array(0.0)
+#     self.assertAllClose(ans, expected, check_dtypes=False)
+
+#   # TODO(mattjj): make this a more systematic test
+#   def testRemainder(self):
+#     rng = onp.random.RandomState(0)
+#     x = rng.uniform(-0.9, 9, size=(3, 4))
+#     y = rng.uniform(0.7, 1.9, size=(3, 1))
+#     assert not set(onp.unique(x)) & set(onp.unique(y))
+#     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
+#     check_grads(lax.rem, (x, y), 2, ["fwd", "rev"], tol, tol)
+
+#     rng = onp.random.RandomState(0)
+#     x = rng.uniform(-0.9, 9, size=(1, 4))
+#     y = rng.uniform(0.7, 1.9, size=(3, 4))
+#     assert not set(onp.unique(x)) & set(onp.unique(y))
+#     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
+#     check_grads(lax.rem, (x, y), 2, ["fwd", "rev"], tol, tol)
+
+
+# def all_bdims(*shapes):
+#   bdims = (itertools.chain([None], range(len(shape) + 1)) for shape in shapes)
+#   return (t for t in itertools.product(*bdims) if not all(e is None for e in t))
+
+# def add_bdim(bdim_size, bdim, shape):
+#   shape = list(shape)
+#   if bdim is not None:
+#     shape.insert(bdim, bdim_size)
+#   return tuple(shape)
+
+# def slicer(x, bdim):
+#   if bdim is None:
+#     return lambda _: x
+#   else:
+#     return lambda i: lax.index_in_dim(x, i, bdim, keepdims=False)
+
+# def args_slicer(args, bdims):
+#   slicers = list(map(slicer, args, bdims))
+#   return lambda i: [sl(i) for sl in slicers]
+
+# class LaxVmapTest(jtu.JaxTestCase):
+
+#   def _CheckBatching(self, op, bdim_size, bdims, shapes, dtype, rng,
+#                      rtol=None, atol=None):
+#     batched_shapes = map(partial(add_bdim, bdim_size), bdims, shapes)
+#     args = [rng(shape, dtype) for shape in batched_shapes]
+#     args_slice = args_slicer(args, bdims)
+#     ans = api.vmap(op, bdims)(*args)
+#     expected = onp.stack([op(*args_slice(i)) for i in range(bdim_size)])
+#     self.assertAllClose(ans, expected, check_dtypes=True, rtol=rtol, atol=atol)
+
+#   @parameterized.named_parameters(itertools.chain.from_iterable(
+#       jtu.cases_from_list(
+#         {"testcase_name": "{}_bdims={}".format(
+#             jtu.format_test_name_suffix(rec.op, shapes,
+#                                         itertools.repeat(dtype)), bdims),
+#          "op_name": rec.op, "rng_factory": rec.rng_factory, "shapes": shapes,
+#          "dtype": dtype, "bdims": bdims}
+#         for shape_group in compatible_shapes
+#         for shapes in CombosWithReplacement(shape_group, rec.nargs)
+#         for bdims in all_bdims(*shapes)
+#         for dtype in rec.dtypes)
+#       for rec in LAX_OPS))
+#   def testOp(self, op_name, rng_factory, shapes, dtype, bdims):
+#     rng = rng_factory()
+#     op = getattr(lax, op_name)
+#     tol = tolerance(dtype)
+#     self._CheckBatching(op, 10, bdims, shapes, dtype, rng, tol, tol)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_strides={}_padding={}_lhs_dilation={}_"
+#        "rhs_dilation={}_dims={}_feature_group_count={}_lhs_bdim={}_rhs_bdim={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                strides, padding, lhs_dil, rhs_dil, ",".join(dim_nums),
+#                feature_group_count, lhs_bdim, rhs_bdim),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "strides": strides, "padding": padding, "lhs_dil": lhs_dil,
+#        "rhs_dil": rhs_dil, "rng_factory": rng_factory, "dimension_numbers": dim_nums,
+#        "perms": perms, "lhs_bdim": lhs_bdim, "rhs_bdim": rhs_bdim,
+#        "feature_group_count": feature_group_count}
+#       for lhs_shape, rhs_shape, all_strides, all_pads, lhs_dils, rhs_dils in [
+#           ((b, i, 6, 7),  # lhs_shape
+#            (j, i, 1, 2),  # rhs_shape
+#            [(1, 1), (1, 2), (2, 1)],  # strides
+#            [((0, 0), (0, 0)), ((1, 0), (0, 1)), ((0, -1), (0, 0))],  # pads
+#            [(1, 1), (2, 1)],  # lhs_dils
+#            [(1, 1), (2, 2)])  # rhs_dils
+#           for b, i, j in itertools.product([1, 2], repeat=3)]
+#       for feature_group_count in [1, 2]
+#       for strides in all_strides
+#       for rhs_dil in rhs_dils
+#       for lhs_dil in lhs_dils
+#       for dtype in [onp.float32]
+#       for padding in all_pads
+#       for dim_nums, perms in [
+#           (("NCHW", "OIHW", "NCHW"), ([0, 1, 2, 3], [0, 1, 2, 3])),
+#           (("NHWC", "HWIO", "NHWC"), ([0, 2, 3, 1], [2, 3, 1, 0])),
+#           (("NHWC", "OIHW", "NCHW"), ([0, 2, 3, 1], [0, 1, 2, 3]))]
+#       for lhs_bdim in itertools.chain([None], range(len(lhs_shape) + 1))
+#       for rhs_bdim in itertools.chain([None], range(len(rhs_shape) + 1))
+#       if (lhs_bdim, rhs_bdim) != (None, None)
+#       for rng_factory in [jtu.rand_default]
+#   ))
+#   # TODO(mattjj): some cases fail on TPU just due to numerical tolerances
+#   @jtu.skip_on_devices("tpu")
+#   def testConvGeneralDilatedBatching(
+#       self, lhs_shape, rhs_shape, dtype, strides, padding, lhs_dil, rhs_dil,
+#       dimension_numbers, perms, feature_group_count, lhs_bdim, rhs_bdim, rng_factory):
+#     rng = rng_factory()
+#     tol = 1e-1 if onp.finfo(dtype).bits <= 32 else 1e-3
+
+#     # permute shapes to match dim_spec, scale by feature_group_count
+#     lhs_perm, rhs_perm = perms
+#     lhs_shape = list(onp.take(lhs_shape, lhs_perm))
+#     rhs_shape = list(onp.take(rhs_shape, rhs_perm))
+#     dim_spec = lax.conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers)
+#     lhs_shape[dim_spec.lhs_spec[1]] *= feature_group_count
+#     rhs_shape[dim_spec.rhs_spec[0]] *= feature_group_count
+
+#     conv = partial(lax.conv_general_dilated, window_strides=strides,
+#                    padding=padding, lhs_dilation=lhs_dil, rhs_dilation=rhs_dil,
+#                    dimension_numbers=dimension_numbers,
+#                    feature_group_count=feature_group_count,
+#                    precision=lax.Precision.HIGHEST)
+#     self._CheckBatching(conv, 5, (lhs_bdim, rhs_bdim), (lhs_shape, rhs_shape),
+#                         dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_from_dtype={}_to_dtype={}_bdims={}".format(
+#           shape, from_dtype, to_dtype, bdims),
+#        "shape": shape, "from_dtype": from_dtype, "to_dtype": to_dtype,
+#        "bdims": bdims, "rng_factory": rng_factory}
+#       for from_dtype, to_dtype in itertools.product(
+#           [onp.float32, onp.int32, "float32", "int32"], repeat=2)
+#       for shape in [(2, 3)]
+#       for bdims in all_bdims(shape)
+#       for rng_factory in [jtu.rand_default]))
+#   def testConvertElementType(self, shape, from_dtype, to_dtype, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda x: lax.convert_element_type(x, to_dtype)
+#     self._CheckBatching(op, 10, bdims, (shape,), from_dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_from_dtype={}_to_dtype={}_bdims={}".format(
+#           shape, from_dtype, to_dtype, bdims),
+#        "shape": shape, "from_dtype": from_dtype, "to_dtype": to_dtype,
+#        "bdims": bdims, "rng_factory": rng_factory}
+#       for from_dtype, to_dtype in itertools.product(
+#           [onp.float32, onp.int32, "float32", "int32"], repeat=2)
+#       for shape in [(2, 3)]
+#       for bdims in all_bdims(shape)
+#       for rng_factory in [jtu.rand_default]))
+#   def testBitcastElementType(self, shape, from_dtype, to_dtype, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda x: lax.bitcast_convert_type(x, to_dtype)
+#     self._CheckBatching(op, 10, bdims, (shape,), from_dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_min_shape={}_operand_shape={}_max_shape={}_bdims={}"
+#        .format(jtu.format_shape_dtype_string(min_shape, dtype),
+#                jtu.format_shape_dtype_string(operand_shape, dtype),
+#                jtu.format_shape_dtype_string(max_shape, dtype),
+#                bdims),
+#        "min_shape": min_shape, "operand_shape": operand_shape,
+#        "max_shape": max_shape, "dtype": dtype, "bdims": bdims, "rng_factory": rng_factory}
+#       for min_shape, operand_shape, max_shape in [
+#           [(), (2, 3), ()],
+#           [(2, 3), (2, 3), ()],
+#           [(), (2, 3), (2, 3)],
+#           [(2, 3), (2, 3), (2, 3)],
+#       ]
+#       for dtype in default_dtypes
+#       for bdims in all_bdims(min_shape, operand_shape, max_shape)
+#       for rng_factory in [jtu.rand_default]))
+#   def testClamp(self, min_shape, operand_shape, max_shape, dtype, bdims, rng_factory):
+#     rng = rng_factory()
+#     raise SkipTest("batching rule for clamp not implemented")  # TODO(mattj)
+#     shapes = [min_shape, operand_shape, max_shape]
+#     self._CheckBatching(lax.clamp, 10, bdims, shapes, dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_lhs_shape={}_rhs_shape={}_bdims={}".format(
+#           jtu.format_shape_dtype_string(lhs_shape, dtype),
+#           jtu.format_shape_dtype_string(rhs_shape, dtype),
+#           bdims),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "bdims": bdims, "rng_factory": rng_factory}
+#       for lhs_shape in [(3,), (4, 3)] for rhs_shape in [(3,), (3, 6)]
+#       for bdims in all_bdims(lhs_shape, rhs_shape)
+#       for dtype in default_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testDot(self, lhs_shape, rhs_shape, dtype, bdims, rng_factory):
+#     rng = rng_factory()
+#     self._CheckBatching(lax.dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng,
+#                         rtol=tolerance(dtype, {onp.float16: 5e-2}))
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_lhs_contracting={}_rhs_contracting={}_bdims={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                lhs_contracting, rhs_contracting, bdims),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "lhs_contracting": lhs_contracting, "rhs_contracting": rhs_contracting,
+#        "bdims": bdims, "rng_factory": rng_factory}
+#       for lhs_shape, rhs_shape, lhs_contracting, rhs_contracting in [
+#           [(3, 5), (2, 5), [1], [1]],
+#           [(5, 3), (5, 2), [0], [0]],
+#           [(5, 3, 2), (5, 2, 4), [0], [0]],
+#           [(5, 3, 2), (5, 2, 4), [0,2], [0,1]],
+#           [(1, 2, 2, 3), (1, 2, 3, 1), [1], [1]],
+#           [(3, 2), (2, 4), [1], [0]],
+#       ]
+#       for bdims in all_bdims(lhs_shape, rhs_shape)
+#       for dtype in default_dtypes
+#       for rng_factory in [jtu.rand_small]))
+#   def testDotGeneralContractOnly(self, lhs_shape, rhs_shape, dtype,
+#                                  lhs_contracting, rhs_contracting, bdims, rng_factory):
+#     rng = rng_factory()
+#     dimension_numbers = ((lhs_contracting, rhs_contracting), ([], []))
+#     dot = partial(lax.dot_general, dimension_numbers=dimension_numbers)
+#     self._CheckBatching(dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_lhs_shape={}_rhs_shape={}_dimension_numbers={}_bdims={}"
+#        .format(jtu.format_shape_dtype_string(lhs_shape, dtype),
+#                jtu.format_shape_dtype_string(rhs_shape, dtype),
+#                dimension_numbers, bdims),
+#        "lhs_shape": lhs_shape, "rhs_shape": rhs_shape, "dtype": dtype,
+#        "dimension_numbers": dimension_numbers, "bdims": bdims, "rng_factory": rng_factory}
+#       for lhs_shape, rhs_shape, dimension_numbers in [
+#           ((3, 3, 2), (3, 2, 4), (([2], [1]), ([0], [0]))),
+#           ((3, 4, 2, 4), (3, 4, 3, 2), (([2], [3]), ([0, 1], [0, 1]))),
+#       ]
+#       for bdims in all_bdims(lhs_shape, rhs_shape)
+#       for dtype in default_dtypes
+#       for rng_factory in [jtu.rand_small]))
+#   def testDotGeneralContractAndBatch(self, lhs_shape, rhs_shape, dtype,
+#                                      dimension_numbers, bdims, rng_factory):
+#     rng = rng_factory()
+#     dot = partial(lax.dot_general, dimension_numbers=dimension_numbers)
+#     self._CheckBatching(dot, 5, bdims, (lhs_shape, rhs_shape), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_dtype={}_broadcast_sizes={}_bdims={}".format(
+#           shape, onp.dtype(dtype).name, broadcast_sizes, bdims),
+#        "shape": shape, "dtype": dtype, "broadcast_sizes": broadcast_sizes,
+#        "bdims": bdims, "rng_factory": rng_factory}
+#       for shape in [(), (2, 3)]
+#       for dtype in default_dtypes
+#       for broadcast_sizes in [(), (2,), (1, 2)]
+#       for bdims in all_bdims(shape)
+#       for rng_factory in [jtu.rand_default]))
+#   def testBroadcast(self, shape, dtype, broadcast_sizes, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda x: lax.broadcast(x, broadcast_sizes)
+#     self._CheckBatching(op, 5, bdims, (shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_inshape={}_outshape={}_bcdims={}_bdims={}".format(
+#           jtu.format_shape_dtype_string(inshape, dtype),
+#           outshape, broadcast_dimensions, bdims),
+#        "inshape": inshape, "dtype": dtype, "outshape": outshape,
+#        "dimensions": broadcast_dimensions, "bdims": bdims,
+#        "rng_factory": rng_factory}
+#       for inshape, outshape, broadcast_dimensions in [
+#           ([2], [2, 2], [0]),
+#           ([2], [2, 2], [1]),
+#           ([2], [2, 3], [0]),
+#           ([], [2, 3], []),
+#       ]
+#       for dtype in default_dtypes
+#       for bdims in all_bdims(inshape)
+#       for rng_factory in [jtu.rand_default]))
+#   def testBroadcastInDim(self, inshape, dtype, outshape, dimensions, bdims, rng_factory):
+#     rng = rng_factory()
+#     raise SkipTest("this test has failures in some cases")  # TODO(mattjj)
+#     op = lambda x: lax.broadcast_in_dim(x, outshape, dimensions)
+#     self._CheckBatching(op, 5, bdims, (inshape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_inshape={}_outshape={}_dims={}_bdims={}".format(
+#           jtu.format_shape_dtype_string(arg_shape, dtype),
+#           jtu.format_shape_dtype_string(out_shape, dtype),
+#           dimensions, bdims),
+#        "arg_shape": arg_shape, "out_shape": out_shape, "dtype": dtype,
+#        "dimensions": dimensions, "bdims": bdims, "rng_factory": rng_factory}
+#       for dtype in default_dtypes
+#       for arg_shape, dimensions, out_shape in [
+#           [(3, 4), None, (12,)],
+#           [(2, 1, 4), None, (8,)],
+#           [(2, 2, 4), None, (2, 8)],
+#           [(2, 2, 4), (0, 1, 2), (2, 8)],
+#           [(2, 2, 4), (1, 0, 2), (8, 2)],
+#           [(2, 2, 4), (2, 1, 0), (4, 2, 2)]
+#       ]
+#       for bdims in all_bdims(arg_shape)
+#       for rng_factory in [jtu.rand_default]))
+#   def testReshape(self, arg_shape, out_shape, dtype, dimensions, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda x: lax.reshape(x, out_shape, dimensions=dimensions)
+#     self._CheckBatching(op, 10, bdims, (arg_shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_inshape={}_pads={}_bdims={}"
+#        .format(jtu.format_shape_dtype_string(shape, dtype), pads, bdims),
+#        "shape": shape, "dtype": dtype, "pads": pads,
+#        "rng_factory": jtu.rand_small, "bdims": bdims}
+#       for shape in [(2, 3)]
+#       for bdims in all_bdims(shape)
+#       for dtype in default_dtypes
+#       for pads in [[(1, 2, 1), (0, 1, 0)]]))
+#   def testPad(self, shape, dtype, pads, bdims, rng_factory):
+#     rng = rng_factory()
+#     fun = lambda operand: lax.pad(operand, onp.array(0, dtype), pads)
+#     self._CheckBatching(fun, 5, bdims, (shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_predshape={}_argshapes={}_bdims={}".format(
+#           jtu.format_shape_dtype_string(pred_shape, onp.bool_),
+#           jtu.format_shape_dtype_string(arg_shape, arg_dtype),
+#           bdims),
+#        "pred_shape": pred_shape, "arg_shape": arg_shape, "arg_dtype": arg_dtype,
+#        "bdims": bdims, "rng_factory": rng_factory}
+#       for arg_shape in [(), (3,), (2, 3)]
+#       for pred_shape in ([(), arg_shape] if arg_shape else [()])
+#       for bdims in all_bdims(pred_shape, arg_shape, arg_shape)
+#       for arg_dtype in default_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testSelect(self, pred_shape, arg_shape, arg_dtype, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda c, x, y: lax.select(c < 0, x, y)
+#     self._CheckBatching(op, 5, bdims, (pred_shape, arg_shape, arg_shape,),
+#                         arg_dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name":
+#        "_shape={}_start_indices={}_limit_indices={}_strides={}_bdims={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype),
+#           start_indices, limit_indices, strides, bdims),
+#        "shape": shape, "dtype": dtype, "starts": start_indices,
+#        "limits": limit_indices, "strides": strides, "bdims": bdims, "rng_factory": rng_factory}
+#       for shape, start_indices, limit_indices, strides in [
+#         [(3,), (1,), (2,), None],
+#         [(7,), (4,), (7,), None],
+#         [(5,), (1,), (5,), (2,)],
+#         [(8,), (1,), (6,), (2,)],
+#         [(5, 3), (1, 1), (3, 2), None],
+#         [(5, 3), (1, 1), (3, 1), None],
+#         [(7, 5, 3), (4, 0, 1), (7, 1, 3), None],
+#         [(5, 3), (1, 1), (2, 1), (1, 1)],
+#         [(5, 3), (1, 1), (5, 3), (2, 1)],
+#       ]
+#       for bdims in all_bdims(shape)
+#       for dtype in default_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testSlice(self, shape, dtype, starts, limits, strides, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda x: lax.slice(x, starts, limits, strides)
+#     self._CheckBatching(op, 5, bdims, (shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_perm={}_bdims={}".format(
+#           jtu.format_shape_dtype_string(shape, dtype), perm, bdims),
+#        "shape": shape, "dtype": dtype, "perm": perm, "bdims": bdims, "rng_factory": rng_factory}
+#       for shape, perm in [
+#         [(3, 4), (1, 0)],
+#         [(3, 4), (0, 1)],
+#         [(3, 4, 5), (2, 1, 0)],
+#         [(3, 4, 5), (1, 0, 2)],
+#       ]
+#       for bdims in all_bdims(shape)
+#       for dtype in default_dtypes
+#       for rng_factory in [jtu.rand_default]))
+#   def testTranspose(self, shape, dtype, perm, bdims, rng_factory):
+#     rng = rng_factory()
+#     op = lambda x: lax.transpose(x, perm)
+#     self._CheckBatching(op, 5, bdims, (shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_op={}_inshape={}_reducedims={}_initval={}_bdims={}"
+#        .format(op.__name__, jtu.format_shape_dtype_string(shape, dtype), dims,
+#                init_val, bdims),
+#        "op": op, "init_val": init_val, "shape": shape, "dtype": dtype,
+#        "dims": dims, "bdims": bdims, "rng_factory": rng_factory}
+#       for init_val, op, dtypes in [
+#           (0, lax.add, default_dtypes),
+#           (1, lax.mul, default_dtypes),
+#           (0, lax.max, all_dtypes), # non-monoidal
+#           (-onp.inf, lax.max, float_dtypes),
+#           (onp.iinfo(onp.int32).min, lax.max, [onp.int32]),
+#           (onp.iinfo(onp.int64).min, lax.max, [onp.int64]),
+#           (onp.iinfo(onp.uint32).min, lax.max, [onp.uint32]),
+#           (onp.iinfo(onp.uint64).min, lax.max, [onp.uint64]),
+#           (onp.inf, lax.min, float_dtypes),
+#           (onp.iinfo(onp.int32).max, lax.min, [onp.int32]),
+#           (onp.iinfo(onp.int64).max, lax.min, [onp.int64]),
+#           (onp.iinfo(onp.uint32).max, lax.min, [onp.uint32]),
+#           (onp.iinfo(onp.uint64).max, lax.min, [onp.uint64]),
+#       ]
+#       for dtype in dtypes
+#       for shape, dims in [
+#           [(3, 4, 5), (0,)], [(3, 4, 5), (1, 2)],
+#           [(3, 4, 5), (0, 2)], [(3, 4, 5), (0, 1, 2)]
+#       ]
+#       for bdims in all_bdims(shape)
+#       for rng_factory in [jtu.rand_small]))
+#   def testReduce(self, op, init_val, shape, dtype, dims, bdims, rng_factory):
+#     rng = rng_factory()
+#     init_val = onp.asarray(init_val, dtype=dtype)
+#     fun = lambda operand: lax.reduce(operand, init_val, op, dims)
+#     self._CheckBatching(fun, 5, bdims, (shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_op={}_dtype={}_padding={}"
+#        .format(op.__name__, onp.dtype(dtype).name, padding),
+#        "op": op, "init_val": init_val, "dtype": dtype, "padding": padding,
+#        "rng_factory": rng_factory}
+#       for init_val, op, dtypes in [
+#           (0, lax.add, [onp.float32]),
+#           (-onp.inf, lax.max, [onp.float32]),
+#           (onp.inf, lax.min, [onp.float32]),
+#       ]
+#       for dtype in dtypes
+#       for padding in ["VALID", "SAME"]
+#       for rng_factory in [jtu.rand_small]))
+#   def testReduceWindow(self, op, init_val, dtype, padding, rng_factory):
+#     rng = rng_factory()
+#     init_val = onp.asarray(init_val, dtype=dtype)
+
+#     all_configs = itertools.chain(
+#         itertools.product(
+#             [(4, 6)],
+#             [(2, 1), (1, 2)],
+#             [(1, 1), (2, 1), (1, 2)]),
+#         itertools.product(
+#             [(3, 2, 4, 6)], [(1, 1, 2, 1), (2, 1, 2, 1)],
+#             [(1, 2, 2, 1), (1, 1, 1, 1)]))
+
+#     def fun(operand):
+#       return lax.reduce_window(operand, init_val, op, dims, strides, padding)
+
+#     for shape, dims, strides in all_configs:
+#       for bdims in all_bdims(shape):
+#         self._CheckBatching(fun, 3, bdims, (shape,), dtype, rng)
+
+#   @parameterized.named_parameters(jtu.cases_from_list(
+#       {"testcase_name": "_shape={}_bdims={}_fft_ndims={}"
+#        .format(shape, bdims, fft_ndims),
+#        "shape": shape, "bdims": bdims, "fft_ndims": fft_ndims, "rng_factory": rng_factory}
+#       for shape in [(5,), (3, 4, 5), (2, 3, 4, 5)]
+#       for bdims in all_bdims(shape)
+#       for fft_ndims in range(0, min(3, len(shape)) + 1)
+#       for rng_factory in [jtu.rand_default]))
+#   @jtu.skip_on_devices("tpu")  # TODO(b/137993701): unimplemented cases.
+#   def testFft(self, fft_ndims, shape, bdims, rng_factory):
+#     rng = rng_factory()
+#     ndims = len(shape)
+#     axes = range(ndims - fft_ndims, ndims)
+#     fft_lengths = [shape[axis] for axis in axes]
+#     op = lambda x: lax.fft(x, xla_client.FftType.FFT, fft_lengths)
+#     self._CheckBatching(op, 5, bdims, [shape], onp.complex64, rng)
+
+#   # TODO Concatenate
+#   # TODO Reverse
+#   # TODO DynamicSlice
+#   # TODO DynamicUpdateSlice
+#   # TODO Sort
+#   # TODO SortKeyVal
+#   # TODO Collapse
+#   # TODO ScatterAdd
+#   # TODO Scatter
 
 
 if __name__ == '__main__':

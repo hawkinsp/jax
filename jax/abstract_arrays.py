@@ -40,9 +40,10 @@ def concretization_function_error(fun):
 
 # TODO(phawkins): use an enum when we drop Python 2.7 support.
 class TypeCategory(object):
-  def __init__(self, priority, name, default_dtype):
+  def __init__(self, priority, name, scalar_type, default_dtype):
     self.priority = priority
     self.name = name
+    self.scalar_type = scalar_type
     self.default_dtype = default_dtype
 
   def __repr__(self):
@@ -80,10 +81,10 @@ class TypeCategory(object):
       raise ValueError("{} is not a dtype known to JAX.".format(dtype))
 
 
-TypeCategory.BOOL = TypeCategory(0, "bool", onp.dtype(onp.bool_))
-TypeCategory.INT = TypeCategory(1, "int", onp.dtype(onp.int32))
-TypeCategory.FLOAT = TypeCategory(2, "float", onp.dtype(onp.float32))
-TypeCategory.COMPLEX = TypeCategory(3, "complex", onp.dtype(onp.complex64))
+TypeCategory.BOOL = TypeCategory(0, "bool", bool, onp.dtype(onp.bool_))
+TypeCategory.INT = TypeCategory(1, "int", int, onp.dtype(onp.int32))
+TypeCategory.FLOAT = TypeCategory(2, "float", float, onp.dtype(onp.float32))
+TypeCategory.COMPLEX = TypeCategory(3, "complex", complex, onp.dtype(onp.complex64))
 
 class UnshapedArray(core.AbstractValue):
   __slots__ = ['dtype']
@@ -123,7 +124,7 @@ class UnshapedArray(core.AbstractValue):
     if self.dtype == other.dtype:
       return self
     else:
-      raise TypeError(other)
+      raise TypeError(self, other)
 
   def str_short(self):
     return self.dtype.name
@@ -159,7 +160,7 @@ class ShapedArray(UnshapedArray):
     elif self.dtype == other.dtype:
       return UnshapedArray(self.dtype)
     else:
-      raise TypeError(other)
+      raise TypeError(self, other)
 
   def str_short(self):
     shapestr = ','.join(map(str, self.shape))
@@ -206,7 +207,7 @@ class AbstractPythonScalar(core.AbstractValue):
 
   def join(self, other):
     if other.kind != kind:
-      raise TypeError(other)
+      raise TypeError(self, other)
     return self
 
 
@@ -239,7 +240,7 @@ class ConcreteArray(ShapedArray):
     elif self.dtype == other.dtype:
       return UnshapedArray(self.dtype)
     else:
-      raise TypeError(other)
+      raise TypeError(self, other)
 
   def str_short(self):
     return str(self.val)
@@ -266,7 +267,7 @@ class ConcretePythonScalar(AbstractPythonScalar):
     return self.as_shaped_array()
 
   def as_array(self):
-    return ConcreteArray(onp.asarray(self.val))
+    return ConcreteArray(onp.asarray(self.val, self.dtype))
 
   def join(self, other):
     if self == other:
@@ -302,6 +303,9 @@ for t in array_types:
 def make_abstract_python_scalar(val):
   return AbstractPythonScalar(TypeCategory.of_scalar(val))
 
+def zeros_like_python_scalar(x):
+  return onp.array(0, xla_bridge.python_scalar_types[type(x)])
+
 python_scalar_types = {complex, float, int, bool}
 
 if six.PY2:
@@ -309,7 +313,7 @@ if six.PY2:
 
 for t in python_scalar_types:
   core.pytype_aval_mappings[t] = ConcretePythonScalar
-  ad_util.jaxval_zeros_likers[t] = zeros_like_array
+  ad_util.jaxval_zeros_likers[t] = zeros_like_python_scalar
 
 
 def zeros_like_shaped_array(aval):
