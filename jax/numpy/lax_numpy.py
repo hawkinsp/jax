@@ -47,7 +47,7 @@ from six.moves import builtins, xrange
 
 from jax import jit, device_put, custom_transforms, defjvp
 from .. import core
-from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray)
+from ..abstract_arrays import UnshapedArray, ShapedArray, ConcreteArray
 from ..config import flags
 from ..interpreters.xla import DeviceArray
 from .. import lax
@@ -113,20 +113,11 @@ class ndarray(six.with_metaclass(_ArrayMeta, onp.ndarray)):
     raise TypeError("jax.numpy.ndarray() should not be instantiated explicitly."
                     " Use jax.numpy.array, or jax.numpy.zeros instead.")
 
-shape = onp.shape
-ndim = onp.ndim
-
-def isscalar(num):
-  return lax._is_python_scalar(num) or onp.isscalar(num)
-
-_shape = shape
-_ndim = ndim
+shape = _shape = onp.shape
+ndim = _ndum = onp.ndim
+size = onp.size
 
 iscomplexobj = onp.iscomplexobj
-
-def size(x):
-  return 1 if lax._is_python_scalar(x) else onp.size(x)
-
 _dtype = lax.dtype
 
 bool_ = onp.bool_
@@ -362,6 +353,8 @@ def _canonicalize_axis(axis, num_dims):
 
 ### implementations of numpy functions in terms of lax
 
+@_wraps(onp.isscalar)
+def isscalar(num): return lax._is_python_scalar(num) or onp.isscalar(num)
 
 def _one_to_one_unop(numpy_fn, lax_fn, promote_like=False):
   if promote_like:

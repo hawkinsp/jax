@@ -41,7 +41,7 @@ def concretization_function_error(fun):
 
 class UnshapedArray(core.AbstractValue):
   __slots__ = ['dtype', 'weak_type']
-  array_abstraction_level = 4
+  array_abstraction_level = 2
 
   def __init__(self, dtype, weak_type=False):
     self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(dtype))
@@ -91,7 +91,7 @@ class UnshapedArray(core.AbstractValue):
 
 class ShapedArray(UnshapedArray):
   __slots__ = ['shape']
-  array_abstraction_level = 3
+  array_abstraction_level = 1
 
   def __init__(self, shape, dtype, weak_type=False):
     super(ShapedArray, self).__init__(dtype, weak_type=weak_type)
@@ -141,7 +141,7 @@ class ShapedArray(UnshapedArray):
 
 class ConcreteArray(ShapedArray):
   __slots__ = ['val']
-  array_abstraction_level = 1
+  array_abstraction_level = 0
 
   def __init__(self, val, weak_type=False):
     super(ConcreteArray, self).__init__(onp.shape(val), onp.result_type(val),
