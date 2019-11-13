@@ -356,17 +356,17 @@ for scalar_type in [onp.int8, onp.int16, onp.int32, onp.int64,
   register_constant_handler(scalar_type, _scalar_constant_handler)
 
 
-python_scalar_types = {
+python_scalar_dtypes = {
   bool: onp.bool_,
   int: onp.int32,
   float: onp.float32,
   complex: onp.complex64,
 }
 if six.PY2:
-  python_scalar_types[long] = onp.int32  # noqa: F821
+  python_scalar_dtypes[long] = onp.int32  # noqa: F821
 
 def _python_scalar_handler(dtype, c, val, canonicalize_dtypes=True):
   return c.NumpyArrayConstant(dtype(val))
 
-for ptype, dtype in python_scalar_types.items():
+for ptype, dtype in python_scalar_dtypes.items():
   register_constant_handler(ptype, partial(_python_scalar_handler, dtype))

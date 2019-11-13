@@ -114,10 +114,9 @@ class ndarray(six.with_metaclass(_ArrayMeta, onp.ndarray)):
                     " Use jax.numpy.array, or jax.numpy.zeros instead.")
 
 shape = _shape = onp.shape
-ndim = _ndum = onp.ndim
+ndim = _ndim = onp.ndim
 size = onp.size
 
-iscomplexobj = onp.iscomplexobj
 _dtype = lax.dtype
 
 bool_ = onp.bool_
@@ -149,6 +148,7 @@ unsignedinteger = onp.unsignedinteger
 iinfo = onp.iinfo
 finfo = onp.finfo
 
+iscomplexobj = onp.iscomplexobj
 can_cast = onp.can_cast
 issubdtype = onp.issubdtype
 issubsctype = onp.issubsctype
@@ -223,7 +223,6 @@ def _promote_dtypes(*args):
     array_priority = _max(map(_dtype_priority, dtypes)) if dtypes else -1
     dtypes += [x for x in scalars if _dtype_priority(x) > array_priority]
     to_dtype = xla_bridge.canonicalize_dtype(result_type(*dtypes))
-    print("dtypes ", dtypes, " to_dtype ", to_dtype)
     return [lax.convert_element_type(x, to_dtype)
             if _dtype(x) != to_dtype else x for x in args]
 
@@ -239,13 +238,14 @@ def _result_dtype(op, *args):
   return _dtype(op(*args))
 
 
-def _not_array(x):
-  return not isinstance(x, ndarray) and not isscalar(x)
+def _arraylike(x):
+  return isinstance(x, ndarray) or isscalar(x)
 
 def _check_arraylike(fun_name, *args):
   """Check if all args fit JAX's definition of arraylike (ndarray or scalar)."""
-  if _any(_not_array(arg) for arg in args):
-    pos, arg = next((i, arg) for i, arg in enumerate(args) if _not_array(arg))
+  if _any(not _arraylike(arg) for arg in args):
+    pos, arg = next((i, arg) for i, arg in enumerate(args)
+                    if not _arraylike(arg))
     msg = "{} requires ndarray or scalar arguments, got {} at position {}."
     raise TypeError(msg.format(fun_name, type(arg), pos))
 

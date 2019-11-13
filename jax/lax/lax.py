@@ -61,34 +61,6 @@ _min = builtins.max
 _reduce = six.moves.reduce
 _pycomplex = complex
 
-_python_scalar_types = tuple(python_scalar_types)
-
-def _is_python_scalar(x):
-  try:
-    return x.aval.weak_type and _ndim(x) == 0
-  except AttributeError:
-    return type(x) in _python_scalar_types
-
-def _scalar_type(dtype):
-  if onp.issubdtype(dtype, onp.bool_):
-    return bool
-  elif onp.issubdtype(dtype, onp.integer):
-    return int
-  elif onp.issubdtype(dtype, onp.floating):
-    return float
-  elif onp.issubdtype(dtype, onp.complexfloating):
-    return _pycomplex
-  else:
-    raise TypeError("Invalid scalar type {}".format(dtype))
-
-
-def dtype(x):
-  dtype = onp.result_type(x)
-  return (
-    xla_bridge.python_scalar_types[_scalar_type(dtype)] if _is_python_scalar(x)
-    else dtype)
-
-_dtype = dtype
 
 @cache()
 def broadcast_shapes(*shapes):
@@ -4226,8 +4198,35 @@ outfeed_p.def_impl(partial(xla.apply_primitive, outfeed_p))
 outfeed_p.def_abstract_eval(_outfeed_abstract_eval)
 xla.translations[outfeed_p] = _outfeed_translation_rule
 
+
 ### util
 
+def _is_python_scalar(x):
+  try:
+    return x.aval.weak_type and _ndim(x) == 0
+  except AttributeError:
+    return type(x) in python_scalar_types
+
+def _scalar_type(dtype):
+  if onp.issubdtype(dtype, onp.bool_):
+    return bool
+  elif onp.issubdtype(dtype, onp.integer):
+    return int
+  elif onp.issubdtype(dtype, onp.floating):
+    return float
+  elif onp.issubdtype(dtype, onp.complexfloating):
+    return _pycomplex
+  else:
+    raise TypeError("Invalid scalar type {}".format(dtype))
+
+
+def dtype(x):
+  dtype = onp.result_type(x)
+  return (
+    xla_bridge.python_scalar_dtypes[_scalar_type(dtype)] if _is_python_scalar(x)
+    else dtype)
+
+_dtype = dtype
 _shape = onp.shape
 _ndim = onp.ndim
 

@@ -109,7 +109,7 @@ for _t in abstract_arrays.array_types:
   canonicalize_dtype_handlers[_t] = _canonicalize_ndarray_dtype
 
 def _canonicalize_python_scalar_dtype(x):
-  return onp.asarray(x, xb.python_scalar_types[type(x)])
+  return onp.asarray(x, xb.python_scalar_dtypes[type(x)])
 for _t in abstract_arrays.python_scalar_types:
   canonicalize_dtype_handlers[_t] = _canonicalize_python_scalar_dtype
 

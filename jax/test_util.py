@@ -57,7 +57,7 @@ RTOL = 1e-4
 
 def _dtype(x):
   return (getattr(x, 'dtype', None) or
-          onp.dtype(xla_bridge.python_scalar_types.get(type(x), None)) or
+          onp.dtype(xla_bridge.python_scalar_dtypes.get(type(x), None)) or
           onp.asarray(x).dtype)
 
 

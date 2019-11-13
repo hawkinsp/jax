@@ -202,15 +202,15 @@ for t in array_types:
 
 
 def make_abstract_python_scalar(x):
-  return ShapedArray((), xla_bridge.python_scalar_types[type(x)],
+  return ShapedArray((), xla_bridge.python_scalar_dtypes[type(x)],
                      weak_type=True)
 
 def _zeros_like_python_scalar(x):
-  return onp.array(0, xla_bridge.python_scalar_types[type(x)])
+  return onp.array(0, xla_bridge.python_scalar_dtypes[type(x)])
 
 def _make_concrete_python_scalar(x):
   return ConcreteArray(
-    onp.array(x, dtype=xla_bridge.python_scalar_types[type(x)]),
+    onp.array(x, dtype=xla_bridge.python_scalar_dtypes[type(x)]),
     weak_type=True)
 
 python_scalar_types = {complex, float, int, bool}
