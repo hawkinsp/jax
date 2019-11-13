@@ -115,8 +115,8 @@ class ndarray(six.with_metaclass(_ArrayMeta, onp.ndarray)):
     raise TypeError("jax.numpy.ndarray() should not be instantiated explicitly."
                     " Use jax.numpy.array, or jax.numpy.zeros instead.")
 
-shape = lax.shape
-ndim = lax.ndim
+shape = onp.shape
+ndim = onp.ndim
 
 def isscalar(num):
   return lax._is_python_scalar(num) or onp.isscalar(num)
