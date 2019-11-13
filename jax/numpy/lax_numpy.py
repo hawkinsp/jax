@@ -47,9 +47,7 @@ from six.moves import builtins, xrange
 
 from jax import jit, device_put, custom_transforms, defjvp
 from .. import core
-from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray,
-                               AbstractPythonScalar, ConcretePythonScalar,
-                               python_scalar_types, TypeCategory)
+from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray)
 from ..config import flags
 from ..interpreters.xla import DeviceArray
 from .. import lax
@@ -209,6 +207,18 @@ def _rank_promotion_warning_or_error(fun_name, shapes):
            "https://jax.readthedocs.io/en/latest/rank_promotion_warning.html.")
     raise ValueError(msg.format(fun_name, ' '.join(map(str, shapes))))
 
+def _dtype_priority(dtype):
+  if issubdtype(dtype, bool_):
+    return 0
+  elif issubdtype(dtype, integer):
+    return 1
+  elif issubdtype(dtype, floating):
+    return 2
+  elif issubdtype(dtype, complexfloating):
+    return 3
+  else:
+    raise TypeError("Dtype {} is not supported by JAX".format(dtype))
+
 def _promote_dtypes(*args):
   """Convenience function to apply Numpy argument dtype promotion."""
   # TODO(dougalm,mattjj): This is a performance bottleneck. Consider memoizing.
@@ -216,21 +226,13 @@ def _promote_dtypes(*args):
     return args
   else:
     scalars = []
-    from_dtypes = []
-    priority = -1
-    for arg in args:
-      if lax._is_python_scalar(arg):
-        scalars.append(arg)
-      else:
-        from_dtypes.append(_dtype(arg))
-        priority = _max(priority, TypeCategory.of_dtype(_dtype(arg)).priority)
-    for s in scalars:
-      category = lax._scalar_type_category(s)
-      if category.priority > priority:
-        from_dtypes.append(category.default_dtype)
-
-    to_dtype = xla_bridge.canonicalize_dtype(result_type(*from_dtypes))
-    print("from_dtypes ", from_dtypes, " to_dtype ", to_dtype)
+    dtypes = []
+    for x in args:
+      (scalars if lax._is_python_scalar(x) else dtypes).append(_dtype(x))
+    array_priority = _max(map(_dtype_priority, dtypes)) if dtypes else -1
+    dtypes += [x for x in scalars if _dtype_priority(x) > array_priority]
+    to_dtype = xla_bridge.canonicalize_dtype(result_type(*dtypes))
+    print("dtypes ", dtypes, " to_dtype ", to_dtype)
     return [lax.convert_element_type(x, to_dtype)
             if _dtype(x) != to_dtype else x for x in args]
 
@@ -2751,7 +2753,7 @@ def _index_to_gather(x_shape, idx):
     except TypeError:
       abstract_i = None
     # Handle basic int indexes.
-    if (isinstance(abstract_i, (AbstractPythonScalar, ShapedArray)) and
+    if (isinstance(abstract_i, ShapedArray) and
         _int(abstract_i)):
       i = _normalize_index(i, x_shape[x_axis])
       i = lax.convert_element_type(i, int32)
@@ -2778,7 +2780,7 @@ def _index_to_gather(x_shape, idx):
     elif isinstance(i, slice):
       if not _all(
         elt is None or
-        isinstance(core.get_aval(elt), (ConcreteArray, ConcretePythonScalar))
+        isinstance(core.get_aval(elt), ConcreteArray)
         for elt in (i.start, i.stop, i.step)):
         msg = ("Array slice indices must have static start/stop/step to be used "
                "with Numpy indexing syntax. Try lax.dynamic_slice/"
@@ -3215,7 +3217,6 @@ _diff_methods = ["clip", "compress", "conj", "conjugate", "cumprod", "cumsum",
 # Forward operators using a single-underscore-prefix naming convention:
 for operator_name, function in _operators.items():
   setattr(ShapedArray, "_{}".format(operator_name), staticmethod(function))
-  setattr(AbstractPythonScalar, "_{}".format(operator_name), staticmethod(function))
 
 # Forward methods and properties using core.aval_method and core.aval_property:
 for method_name in _nondiff_methods + _diff_methods:

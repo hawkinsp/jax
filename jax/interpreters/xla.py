@@ -33,9 +33,8 @@ from .. import tree_util
 from .. import linear_util as lu
 from .. import abstract_arrays
 from ..abstract_arrays import (ConcreteArray, ShapedArray, AbstractToken,
-                               AbstractPythonScalar, ConcretePythonScalar,
                                make_shaped_array, raise_to_shaped,
-                               abstract_token, TypeCategory)
+                               abstract_token)
 from ..core import valid_jaxtype, Literal
 from ..util import partial, partialmethod, cache, safe_map, prod, unzip2
 from ..lib import xla_bridge as xb
@@ -68,8 +67,6 @@ xla_shape_handlers = {}
 xla_shape_handlers[core.AbstractUnit] = lambda _: xc.Shape.tuple_shape(())
 xla_shape_handlers[ShapedArray] = lambda a: xc.Shape.array_shape(a.dtype, a.shape)
 xla_shape_handlers[ConcreteArray] = lambda a: xc.Shape.array_shape(a.dtype, a.shape)
-xla_shape_handlers[AbstractPythonScalar] = lambda a: xc.Shape.array_shape(a.dtype, ())
-xla_shape_handlers[ConcretePythonScalar] = lambda a: xc.Shape.array_shape(a.dtype, ())
 
 def aval_to_result_handler(aval):
   try:
@@ -81,8 +78,6 @@ xla_result_handlers[core.AbstractUnit] = lambda _: lambda _: core.unit
 def array_result_handler(aval): return partial(DeviceArray, raise_to_shaped(aval))
 xla_result_handlers[ShapedArray] = array_result_handler
 xla_result_handlers[ConcreteArray] = array_result_handler
-xla_result_handlers[AbstractPythonScalar] = array_result_handler
-xla_result_handlers[ConcretePythonScalar] = array_result_handler
 
 def device_put(x, device=None, backend=None):
   x = canonicalize_dtype(x)
@@ -114,8 +109,7 @@ for _t in abstract_arrays.array_types:
   canonicalize_dtype_handlers[_t] = _canonicalize_ndarray_dtype
 
 def _canonicalize_python_scalar_dtype(x):
-  return onp.asarray(
-    x, xb.canonicalize_dtype(TypeCategory.of_scalar(x).default_dtype))
+  return onp.asarray(x, xb.python_scalar_types[type(x)])
 for _t in abstract_arrays.python_scalar_types:
   canonicalize_dtype_handlers[_t] = _canonicalize_python_scalar_dtype
 

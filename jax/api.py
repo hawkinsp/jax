@@ -54,7 +54,7 @@ from .util import (unzip2, unzip3, curry, partial, safe_map, safe_zip,
 from .lib.xla_bridge import (canonicalize_dtype, device_count,
                              local_device_count, devices, local_devices,
                              host_id, host_ids, host_count)
-from .abstract_arrays import ShapedArray, AbstractPythonScalar, raise_to_shaped
+from .abstract_arrays import ShapedArray, raise_to_shaped
 from .interpreters import partial_eval as pe
 from .interpreters import xla
 from .interpreters import pxla
@@ -408,7 +408,6 @@ def value_and_grad(fun, argnums=0, has_aux=False, holomorphic=False):
 
   return value_and_grad_f
 
-_scalar_avals = (ShapedArray, AbstractPythonScalar)
 def _check_scalar(x):
   msg = "Gradient only defined for scalar-output functions. Output {}.".format
   try:
@@ -416,7 +415,7 @@ def _check_scalar(x):
   except TypeError:
     raise TypeError(msg("was {}".format(x)))
   else:
-    if isinstance(aval, _scalar_avals):
+    if isinstance(aval, ShapedArray):
       if aval.shape != ():
         raise TypeError(msg("had shape: {}".format(aval.shape)))
     else:

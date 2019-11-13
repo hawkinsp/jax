@@ -38,10 +38,9 @@ from .. import linear_util as lu
 from ..config import flags
 from ..core import Primitive
 from ..abstract_arrays import (UnshapedArray, ShapedArray, ConcreteArray,
-                               AbstractPythonScalar,
                                AbstractToken, array_types, make_shaped_array,
                                raise_to_shaped, abstract_token,
-                               python_scalar_types, TypeCategory)
+                               python_scalar_types)
 from ..interpreters import partial_eval as pe
 from ..interpreters import xla
 from ..interpreters import pxla
@@ -60,25 +59,35 @@ FLAGS = flags.FLAGS
 _max = builtins.max
 _min = builtins.max
 _reduce = six.moves.reduce
-
+_pycomplex = complex
 
 _python_scalar_types = tuple(python_scalar_types)
 
 def _is_python_scalar(x):
   try:
-    return isinstance(x.aval, AbstractPythonScalar)
+    return x.aval.weak_type and onp.ndim(x) == 0
   except AttributeError:
     return type(x) in _python_scalar_types
 
-def _scalar_type_category(x):
-  try:
-    return x.aval.kind
-  except AttributeError:
-    return TypeCategory.of_scalar(x)
+def _scalar_type(dtype):
+  if onp.issubdtype(dtype, onp.bool_):
+    return bool
+  elif onp.issubdtype(dtype, onp.integer):
+    return int
+  elif onp.issubdtype(dtype, onp.floating):
+    return float
+  elif onp.issubdtype(dtype, onp.complexfloating):
+    return _pycomplex
+  else:
+    raise TypeError("Invalid scalar type {}".format(dtype))
+
 
 def dtype(x):
-  return (_scalar_type_category(x).default_dtype if _is_python_scalar(x)
-          else onp.result_type(x))
+  dtype = onp.result_type(x)
+  return (
+    xla_bridge.python_scalar_types[_scalar_type(dtype)] if _is_python_scalar(x)
+    else dtype)
+
 _dtype = dtype
 
 @cache()
@@ -1499,7 +1508,6 @@ def standard_reduction_primitive(shape_rule, dtype_rule, name, translation_rule=
 
 
 def standard_abstract_eval(shape_rule, dtype_rule, *args, **kwargs):
-  args = [x.as_array() if isinstance(x, AbstractPythonScalar) else x for x in args]
   assert all(isinstance(arg, UnshapedArray) for arg in args), args
   least_specialized = _max(
       map(type, args), key=operator.attrgetter('array_abstraction_level'))
@@ -4384,7 +4392,7 @@ def _dynamic_slice_indices(operand, start_indices):
 
 def _const(example, val):
   if _is_python_scalar(example):
-    return _scalar_type_category(example).scalar_type(val)
+    return _scalar_type(_dtype(example))(val)
   else:
     return onp.array(val, _dtype(example))
 

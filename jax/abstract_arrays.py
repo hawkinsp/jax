@@ -38,63 +38,18 @@ def concretization_function_error(fun):
     raise TypeError(concretization_err_msg(fun))
   return error
 
-# TODO(phawkins): use an enum when we drop Python 2.7 support.
-class TypeCategory(object):
-  def __init__(self, priority, name, scalar_type, default_dtype):
-    self.priority = priority
-    self.name = name
-    self.scalar_type = scalar_type
-    self.default_dtype = default_dtype
-
-  def __repr__(self):
-    return "TypeCategory({})".format(self.name)
-
-  def __str__(self):
-    return self.name
-
-  @classmethod
-  def of_scalar(cls, val):
-    if isinstance(val, bool):
-      return cls.BOOL
-    elif isinstance(val, int):
-      return cls.INT
-    elif isinstance(val, float):
-      return cls.FLOAT
-    elif isinstance(val, complex):
-      return cls.COMPLEX
-    elif six.PY2:
-      if isinstance(val, long):
-        return cls.INT
-    raise ValueError("{} is not a Python scalar.".format(val))
-
-  @classmethod
-  def of_dtype(cls, dtype):
-    if onp.issubdtype(dtype, onp.bool_):
-      return cls.BOOL
-    elif onp.issubdtype(dtype, onp.integer):
-      return cls.INT
-    elif onp.issubdtype(dtype, onp.floating):
-      return cls.FLOAT
-    elif onp.issubdtype(dtype, onp.complexfloating):
-      return cls.COMPLEX
-    else:
-      raise ValueError("{} is not a dtype known to JAX.".format(dtype))
-
-
-TypeCategory.BOOL = TypeCategory(0, "bool", bool, onp.dtype(onp.bool_))
-TypeCategory.INT = TypeCategory(1, "int", int, onp.dtype(onp.int32))
-TypeCategory.FLOAT = TypeCategory(2, "float", float, onp.dtype(onp.float32))
-TypeCategory.COMPLEX = TypeCategory(3, "complex", complex, onp.dtype(onp.complex64))
 
 class UnshapedArray(core.AbstractValue):
-  __slots__ = ['dtype']
+  __slots__ = ['dtype', 'weak_type']
   array_abstraction_level = 4
 
-  def __init__(self, dtype):
+  def __init__(self, dtype, weak_type=False):
     self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(dtype))
+    self.weak_type = weak_type
 
   def __eq__(self, other):
-    return type(self) is type(other) and self.dtype == other.dtype
+    return (type(self) is type(other) and self.dtype == other.dtype and
+            self.weak_type == other.weak_type)
 
   def __ne__(self, other):
     return not self == other
@@ -103,10 +58,11 @@ class UnshapedArray(core.AbstractValue):
     # can use hash(self.dtype) and rely on the fact that numpy reuses base dtype
     # objects, e.g. `onp.zeros(3).dtype is onp.zeros(4).dtype`, or we can use
     # the unique character code via hash(self.dtype.char)
-    return hash(self.dtype)
+    return hash((self.dtype, self.weak_type))
 
   def __repr__(self):
-    return '{}({})'.format(self.__class__.__name__, self.str_short())
+    return '{}({}{})'.format(self.__class__.__name__, self.str_short(),
+                             ", weak_type=True" if self.weak_type else "")
 
   _bool = _nonzero = concretization_function_error(bool)
   _float   = concretization_function_error(float)
@@ -122,7 +78,10 @@ class UnshapedArray(core.AbstractValue):
 
   def join(self, other):
     if self.dtype == other.dtype:
-      return self
+      if self.weak_type == other.weak_type:
+        return self
+      else:
+        return UnshapedArray(self.dtype, weak_type=False)
     else:
       raise TypeError(self, other)
 
@@ -134,8 +93,8 @@ class ShapedArray(UnshapedArray):
   __slots__ = ['shape']
   array_abstraction_level = 3
 
-  def __init__(self, shape, dtype):
-    self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(dtype))
+  def __init__(self, shape, dtype, weak_type=False):
+    super(ShapedArray, self).__init__(dtype, weak_type=weak_type)
     self.shape = shape
 
   ndim = property(lambda self: len(self.shape))
@@ -143,20 +102,24 @@ class ShapedArray(UnshapedArray):
 
   def __eq__(self, other):
     return (type(self) is type(other)
-            and self.dtype == other.dtype and self.shape == other.shape)
+            and self.dtype == other.dtype and self.shape == other.shape
+            and self.weak_type == other.weak_type)
 
   def __hash__(self):
     # can use hash(self.dtype) and rely on the fact that numpy reuses base dtype
     # objects, e.g. `onp.zeros(3).dtype is onp.zeros(4).dtype`, or we can use
     # the unique character code via hash(self.dtype.char)
-    return hash((self.shape, self.dtype))
+    return hash((self.shape, self.dtype, self.weak_type))
 
   def at_least_vspace(self):
     return self
 
   def join(self, other):
     if self.shape == other.shape and self.dtype == other.dtype:
-      return self
+      if self.weak_type == other.weak_type:
+        return self
+      else:
+        return ShapedArray(self.shape, self.dtype, weak_type=False)
     elif self.dtype == other.dtype:
       return UnshapedArray(self.dtype)
     else:
@@ -175,105 +138,43 @@ class ShapedArray(UnshapedArray):
   def _len(self, ignored_tracer):
     return len(self)
 
-class AbstractPythonScalar(core.AbstractValue):
-  __slots__ = ['kind']
-  array_abstraction_level = 2
-
-  def __init__(self, kind):
-    self.kind = kind
-
-  def __repr__(self):
-    return "AbstractPythonScalar({})".format(self.kind)
-
-  def __eq__(self, other):
-    return type(self) is type(other) and self.kind == other.kind
-
-  def __hash__(self):
-    return hash(self.kind)
-
-  @property
-  def dtype(self):
-    return self.kind.default_dtype
-
-  @property
-  def shape(self):
-    return ()
-  
-  def as_shaped_array(self):
-    return ShapedArray((), self.dtype)
-
-  def as_array(self):
-    return ShapedArray((), self.dtype)
-
-  def join(self, other):
-    if other.kind != kind:
-      raise TypeError(self, other)
-    return self
-
 
 class ConcreteArray(ShapedArray):
   __slots__ = ['val']
   array_abstraction_level = 1
 
-  def __init__(self, val):
+  def __init__(self, val, weak_type=False):
+    super(ConcreteArray, self).__init__(onp.shape(val), onp.result_type(val),
+                                        weak_type=weak_type)
+    # Note: canonicalized self.dtype doesn't necessarily match self.val
     self.val = val
-    self.shape = onp.shape(val)
-    # canonicalized self.dtype doesn't necessarily match self.val
-    self.dtype = onp.dtype(xla_bridge.canonicalize_dtype(onp.result_type(val)))
     assert self.dtype != onp.dtype('O')
 
   def __eq__(self, other):
     return (type(self) is type(other) and self.dtype == other.dtype
-            and self.shape == other.shape and onp.all(self.val == other.val))
+            and self.shape == other.shape and self.weak_type == other.weak_type
+            and onp.all(self.val == other.val))
 
   def __hash__(self):
     return id(self.val)
 
   def at_least_vspace(self):
-    return ShapedArray(self.shape, self.dtype)
+    return ShapedArray(self.shape, self.dtype, weak_type=self.weak_type)
 
   def join(self, other):
     if self == other:
       return self
     elif self.shape == other.shape and self.dtype == other.dtype:
-      return ShapedArray(self.shape, self.dtype)
+      return ShapedArray(self.shape, self.dtype,
+                         weak_type=self.weak_type and other.weak_type)
     elif self.dtype == other.dtype:
-      return UnshapedArray(self.dtype)
+      return UnshapedArray(self.dtype,
+                           weak_type=self.weak_type and other.weak_type)
     else:
       raise TypeError(self, other)
 
   def str_short(self):
     return str(self.val)
-
-
-class ConcretePythonScalar(AbstractPythonScalar):
-  __slots__ = ['val']
-  array_abstraction_level = 0
-
-  def __init__(self, val):
-    super(ConcretePythonScalar, self).__init__(TypeCategory.of_scalar(val))
-    self.val = val
-
-  def __repr__(self):
-    return "ConcretePythonScalar({})".format(self.val)
-
-  def __eq__(self, other):
-    return type(self) is type(other) and self.val == other.val
-
-  def __hash__(self):
-    return hash(self.val)
-
-  def at_least_vspace(self):
-    return self.as_shaped_array()
-
-  def as_array(self):
-    return ConcreteArray(onp.asarray(self.val, self.dtype))
-
-  def join(self, other):
-    if self == other:
-      return self
-    elif self.kind == other.kind:
-      return AbstractPythonScalar(self.kind)
 
 
 class AbstractToken(core.AbstractValue): pass
@@ -300,11 +201,17 @@ for t in array_types:
   ad_util.jaxval_zeros_likers[t] = zeros_like_array
 
 
-def make_abstract_python_scalar(val):
-  return AbstractPythonScalar(TypeCategory.of_scalar(val))
+def make_abstract_python_scalar(x):
+  return ShapedArray((), xla_bridge.python_scalar_types[type(x)],
+                     weak_type=True)
 
-def zeros_like_python_scalar(x):
+def _zeros_like_python_scalar(x):
   return onp.array(0, xla_bridge.python_scalar_types[type(x)])
+
+def _make_concrete_python_scalar(x):
+  return ConcreteArray(
+    onp.array(x, dtype=xla_bridge.python_scalar_types[type(x)]),
+    weak_type=True)
 
 python_scalar_types = {complex, float, int, bool}
 
@@ -312,8 +219,8 @@ if six.PY2:
   python_scalar_types.add(long)  # noqa: F821
 
 for t in python_scalar_types:
-  core.pytype_aval_mappings[t] = ConcretePythonScalar
-  ad_util.jaxval_zeros_likers[t] = zeros_like_python_scalar
+  core.pytype_aval_mappings[t] = _make_concrete_python_scalar
+  ad_util.jaxval_zeros_likers[t] = _zeros_like_python_scalar
 
 
 def zeros_like_shaped_array(aval):
@@ -324,9 +231,7 @@ ad_util.aval_zeros_likers[ShapedArray] = zeros_like_shaped_array
 
 def raise_to_shaped(aval):
   if isinstance(aval, ShapedArray):
-    return ShapedArray(aval.shape, aval.dtype)
-  elif isinstance(aval, AbstractPythonScalar):
-    return aval.as_shaped_array()
+    return ShapedArray(aval.shape, aval.dtype, weak_type=aval.weak_type)
   elif aval is core.abstract_unit:
     return core.abstract_unit
   elif aval is abstract_token:
