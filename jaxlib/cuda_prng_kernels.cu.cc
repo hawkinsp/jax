@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <cstddef>
 
+#include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 #include "jaxlib/cuda_prng_kernels.h"
 #include "jaxlib/kernel_helpers.h"
 
@@ -94,6 +95,12 @@ __global__ void ThreeFry2x32Kernel(const std::uint32_t* key0,
   }
 }
 
+void ThrowIfError(cudaError_t error) {
+  if (error != cudaSuccess) {
+    throw std::runtime_error("CUDA operation failed");
+  }
+}
+
 }  // namespace
 
 struct ThreeFry2x32Descriptor {
@@ -123,6 +130,7 @@ void CudaThreeFry2x32(cudaStream_t stream, void** buffers, const char* opaque,
   ThreeFry2x32Kernel<<<grid_dim, block_dim, /*dynamic_shared_mem_bytes=*/0,
                        stream>>>(keys[0], keys[1], data[0], data[1], out[0],
                                  out[1], descriptor.n);
+  ThrowIfError(cudaGetLastError());
 }
 
 }  // namespace jax
