@@ -17,9 +17,12 @@ jax 0.2.9 (Unreleased)
 
 * Breaking changes:
 
-  * ``jax.ops.segment_sum` now drops segment IDs that are out of range rather
+  * ``jax.ops.segment_sum`` now drops segment IDs that are out of range rather
     than wrapping them into the segment ID space. This was done for performance
     reasons.
+  * ``jax.numpy.linspace`` now computes the floor of integer values, i.e.,
+    rounding towards -inf rather than 0. This change was made to match NumPy
+    1.20.0.
 
 * `GitHub commits <https://github.com/google/jax/compare/jax-v0.2.8...jax-v0.2.9>`__.
 

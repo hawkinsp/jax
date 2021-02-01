@@ -191,8 +191,8 @@ JAX_ONE_TO_ONE_OP_RECORDS = [
 # Skip np.i0() tests on older numpy: https://github.com/numpy/numpy/issues/11205
 if numpy_version >= (1, 17, 0):
   JAX_ONE_TO_ONE_OP_RECORDS.append(
-      op_record("i0", 1, inexact_dtypes, all_shapes, jtu.rand_default, [],
-                tolerance={np.complex64: 1E-5, np.complex128: 1E-14}),
+      op_record("i0", 1, float_dtypes, all_shapes, jtu.rand_default, [],
+                check_dtypes=False),
   )
 
 JAX_COMPOUND_OP_RECORDS = [
@@ -833,7 +833,7 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
     rng = rng_factory(self.rng())
     is_bf16_nan_test = dtype == jnp.bfloat16 and rng_factory.__name__ == 'rand_some_nan'
     # Do not pass where via args_maker as that is incompatible with _promote_like_jnp.
-    where = jtu.rand_bool(self.rng())(whereshape, np.bool)
+    where = jtu.rand_bool(self.rng())(whereshape, np.bool_)
     @jtu.ignore_warning(category=RuntimeWarning,
                         message="Degrees of freedom <= 0 for slice.*")
     def np_fun(x):
@@ -4315,7 +4315,8 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
       jtu.cases_from_list(
         {"testcase_name": ("_start_shape={}_stop_shape={}_num={}_endpoint={}"
                            "_retstep={}_dtype={}").format(
-            start_shape, stop_shape, num, endpoint, retstep, dtype),
+            start_shape, stop_shape, num, endpoint, retstep,
+            dtype.__name__ if dtype else "None"),
          "start_shape": start_shape, "stop_shape": stop_shape,
          "num": num, "endpoint": endpoint, "retstep": retstep,
          "dtype": dtype}
@@ -4340,9 +4341,16 @@ class LaxBackedNumpyTests(jtu.JaxTestCase):
       jnp_op = lambda start, stop: jnp.linspace(
         start, stop, num,
         endpoint=endpoint, retstep=retstep, dtype=dtype, axis=axis)
-      np_op = lambda start, stop: np.linspace(
-        start, stop, num,
-        endpoint=endpoint, retstep=retstep, dtype=dtype, axis=axis)
+      # NumPy 1.20.0 changed the semantics of linspace to floor for integer
+      # dtypes.
+      if numpy_version >= (1, 20) and np.issubdtype(dtype, np.integer):
+        np_op = lambda start, stop: np.linspace(
+          start, stop, num,
+          endpoint=endpoint, retstep=retstep, dtype=dtype, axis=axis)
+      else:
+        np_op = lambda start, stop: np.linspace(
+          start, stop, num,
+          endpoint=endpoint, retstep=retstep, axis=axis).astype(dtype)
       self._CheckAgainstNumpy(np_op, jnp_op, args_maker,
                               check_dtypes=False, tol=tol)
       # floating-point compute between jitted platforms and non-jit + rounding
