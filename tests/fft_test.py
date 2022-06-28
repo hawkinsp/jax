@@ -96,6 +96,8 @@ def _zero_for_irfft(z, axes):
 
 
 class FftTest(jtu.JaxTestCase):
+  def setUp(self): super().setUp(); import faulthandler; faulthandler.disable()
+
 
   def testNotImplemented(self):
     for name in jnp.fft._NOT_IMPLEMENTED:
