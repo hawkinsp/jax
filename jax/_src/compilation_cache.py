@@ -28,6 +28,7 @@ from jax._src import path as pathlib
 from jax._src import cache_key
 from jax._src.compilation_cache_interface import CacheInterface
 from jax._src.gfile_cache import GFileCache
+from jax._src.sqlite_cache import SqliteCache
 from jax._src.lib import xla_client
 from jax._src.lib.mlir import ir
 
@@ -55,7 +56,7 @@ def initialize_cache(path):
   assert (
       _cache is None
   ), f"The cache path has already been initialized to {_cache._path}"
-  _cache = GFileCache(path)
+  _cache = SqliteCache(path)
   logger.warning("Initialized persistent compilation cache at %s", path)
 
 
