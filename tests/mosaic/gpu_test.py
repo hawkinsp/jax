@@ -171,7 +171,7 @@ class TestCase(parameterized.TestCase):
     self.context = mlir.make_ir_context()
     if mgpu_dialect is not None:
       mgpu_dialect.register_dialect(self.context)
-    self.enter_context(jtu.global_config_context(jax_traceback_filtering="off"))
+    self.enter_context(jtu.thread_local_config_context(jax_traceback_filtering="off"))
     self.enter_context(self.context)
     self.enter_context(ir.Location.unknown())
 
