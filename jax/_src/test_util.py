@@ -77,6 +77,17 @@ _TEST_DUT = config.string_flag(
     'Describes the device under test in case special consideration is required.'
 )
 
+TEST_THREAD_PARALLELISM = config.bool_flag(
+    'jax_test_thread_parallelism',
+    config.bool_env('JAX_TEST_THREAD_PARALLELISM', False),
+    help=
+    'Set to True if the test suite will use thread-parallelism. This config '
+    'flag has the effect of disabl'
+)
+
+assert TEST_THREAD_PARALLELISM.value
+
+
 NUM_GENERATED_CASES = config.int_flag(
   'jax_num_generated_cases',
   int(os.getenv('JAX_NUM_GENERATED_CASES', '10')),
@@ -233,6 +244,12 @@ def _capture_output(fp: TextIO) -> Generator[Callable[[], str], None, None]:
 
 capture_stdout = partial(_capture_output, sys.stdout)
 capture_stderr = partial(_capture_output, sys.stderr)
+
+@contextmanager
+def thread_unsafe():
+  if TEST_THREAD_PARALLELISM.value:
+    return
+  yield
 
 
 @contextmanager
@@ -1165,17 +1182,16 @@ def promote_like_jnp(fun, inexact=False):
     return fun(*args, **kw)
   return wrapper
 
+
 @contextmanager
-def global_config_context(**kwds):
-  original_config = {}
+def thread_local_config_context(**kwds):
+  stack = ExitStack()
+  for config, value in kwds.items():
+    stack.enter_context(jax._src.config.config_states[config](value))
   try:
-    for key, value in kwds.items():
-      original_config[key] = config._read(key)
-      config.update(key, value)
     yield
   finally:
-    for key, value in original_config.items():
-      config.update(key, value)
+    stack.close()
 
 
 class NotPresent:
@@ -1208,7 +1224,7 @@ class JaxTestCase(parameterized.TestCase):
     'jax_legacy_prng_key': 'error',
   }
 
-  _compilation_cache_exit_stack: ExitStack | None = None
+  _test_class_exitstack: ExitStack | None = None
 
   def tearDown(self) -> None:
     assert core.reset_trace_state()
@@ -1224,9 +1240,10 @@ class JaxTestCase(parameterized.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    cls._compilation_cache_exit_stack = ExitStack()
-    stack = cls._compilation_cache_exit_stack
-    stack.enter_context(global_config_context(**cls._default_config))
+    cls._test_class_exitstack = ExitStack()
+    stack = cls._test_class_exitstack
+    for config, value in cls._default_config.items():
+      stack.enter_context(jax._src.config.config_states[config](value))
 
     if TEST_WITH_PERSISTENT_COMPILATION_CACHE.value:
       stack.enter_context(config.enable_compilation_cache(True))
@@ -1240,7 +1257,7 @@ class JaxTestCase(parameterized.TestCase):
 
   @classmethod
   def tearDownClass(cls):
-    cls._compilation_cache_exit_stack.close()
+    cls._test_class_exitstack.close()
 
   def rng(self):
     return self._rng
@@ -1352,7 +1369,7 @@ class JaxTestCase(parameterized.TestCase):
 
     cache_misses = dispatch.xla_primitive_callable.cache_info().misses
     python_ans = fun(*args)
-    if check_cache_misses:
+    if not TEST_THREAD_PARALLELISM.value and check_cache_misses:
       self.assertEqual(
           cache_misses, dispatch.xla_primitive_callable.cache_info().misses,
           "Compilation detected during second call of {} in op-by-op "

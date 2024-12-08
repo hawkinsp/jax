@@ -165,7 +165,7 @@ class TestCase(parameterized.TestCase):
       self.skipTest("Only works on GPU with capability >= sm90")
     super().setUp()
     self.prng = np.random.default_rng(1234)
-    self.enter_context(jtu.global_config_context(jax_traceback_filtering="off"))
+    self.enter_context(jtu.thread_local_config_context(jax_traceback_filtering="off"))
     self.enter_context(mlir.make_ir_context())
     self.enter_context(ir.Location.unknown())
 

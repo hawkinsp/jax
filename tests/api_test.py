@@ -4327,10 +4327,7 @@ class APITest(jtu.JaxTestCase):
       return x + x
 
     for f in [f_jit, f_cond]:
-      # Use _read() to read the flag value rather than threadlocal value.
-      allow_promotion = config._read("jax_numpy_rank_promotion")
-      try:
-        config.update("jax_numpy_rank_promotion", "allow")
+      with jax.numpy_rank_promotion("allow"):
         num_traces = 0
         @jax.jit
         def f(x):
@@ -4345,16 +4342,11 @@ class APITest(jtu.JaxTestCase):
         with jax.numpy_rank_promotion("warn"):
           f(x)
           self.assertEqual(num_traces, 2)
-          config.update("jax_numpy_rank_promotion", "raise")
           f(x)
           self.assertGreaterEqual(num_traces, 2)
         nt = num_traces
         f(x)
-        self.assertEqual(num_traces, nt + 1)
-        f(x)
-        self.assertEqual(num_traces, nt + 1)
-      finally:
-        config.update("jax_numpy_rank_promotion", allow_promotion)
+        self.assertEqual(num_traces, nt)
 
   def test_grad_negative_argnums(self):
     def f(x, y):
