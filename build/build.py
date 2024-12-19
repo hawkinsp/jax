@@ -69,7 +69,7 @@ def add_global_arguments(parser: argparse.ArgumentParser):
   parser.add_argument(
       "--python_version",
       type=str,
-      choices=["3.10", "3.11", "3.12", "3.13"],
+      choices=["3.10", "3.11", "3.12", "3.13", "3.13-ft"],
       default=f"{sys.version_info.major}.{sys.version_info.minor}",
       help=
         """
