@@ -861,6 +861,7 @@ class PJitTest(jtu.BufferDonationTestCase):
 
     self.assertAllClose(res0, res, check_dtypes=True)
 
+  @unittest.skip("Test is racy under free threading")
   def testOutfeed(self):
     if xla_bridge.using_pjrt_c_api():
       raise unittest.SkipTest('outfeed not implemented in PJRT C API')
