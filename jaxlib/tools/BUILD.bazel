@@ -34,6 +34,7 @@ load(
     "pytype_strict_library",
     "pytype_test",
     "wheel_sources",
+    "py_deps",
 )
 
 licenses(["notice"])  # Apache 2
@@ -493,9 +494,27 @@ filegroup(
     ],
 )
 
+COMMON_DEPS = py_deps([
+    "absl/testing",
+    "numpy",
+    "ml_dtypes",
+    "scipy",
+    "opt_einsum",
+    "hypothesis",
+    "cloudpickle",
+    "flatbuffers",
+])
+
 py_import(
     name = "jaxlib_py_import",
     wheel = ":jaxlib_wheel",
+    deps = COMMON_DEPS,
+)
+
+py_import(
+    name = "jaxlib_pypi_wheel_with_common_dependencies",
+    wheel = "@pypi_jaxlib//:whl",
+    deps = COMMON_DEPS,
 )
 
 py_import(

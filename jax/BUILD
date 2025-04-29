@@ -69,6 +69,36 @@ config_setting(
     },
 )
 
+# The flag controls whether jax should be built by Bazel.
+# If ":build_jax=true", then jax will be built.
+# If ":build_jax=false", then jax is not built. It is assumed that the pre-built jax wheel
+# is available in the "dist" folder.
+# If ":build_jax=wheel", then jax wheel will be built as a py_import rule attribute.
+# The py_import rule unpacks the wheel and provides its content as a py_library.
+string_flag(
+    name = "build_jax",
+    build_setting_default = "true",
+    values = [
+        "true",
+        "false",
+        "wheel",
+    ],
+)
+
+config_setting(
+    name = "enable_jax_build",
+    flag_values = {
+        ":build_jax": "true",
+    },
+)
+
+config_setting(
+    name = "enable_jax_py_import",
+    flag_values = {
+        ":build_jax": "wheel",
+    },
+)
+
 exports_files([
     "LICENSE",
     "version.py",
